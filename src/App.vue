@@ -145,9 +145,9 @@ function onRankingSelect(asset) {
     <!-- ═══ Views with fade transition ═══ -->
     <Transition name="view-fade" mode="out-in">
     <!-- ═══ Analysis view ═══ -->
-    <div v-if="activeTab === 'analysis'" key="analysis" class="flex flex-1 pt-14 relative z-10">
+    <div v-if="activeTab === 'analysis'" key="analysis" class="flex flex-1 relative z-10" style="padding-top: calc(3.5rem + env(safe-area-inset-top, 0px));">
       <!-- Content -->
-      <main class="dot-pattern flex-1 lg:mr-72 overflow-y-auto p-3 sm:p-5 space-y-4" style="max-height: calc(100vh - 56px)">
+      <main class="dot-pattern flex-1 lg:mr-72 overflow-y-auto p-3 sm:p-5 space-y-4" style="max-height: calc(100dvh - 3.5rem - env(safe-area-inset-top, 0px))">
         <!-- Skeleton loading -->
         <SkeletonLoader v-if="loading" />
 
@@ -309,8 +309,8 @@ function onRankingSelect(asset) {
     </div>
 
     <!-- ═══ Ranking view ═══ -->
-    <div v-else-if="activeTab === 'ranking'" key="ranking" class="flex flex-1 pt-14 relative z-10">
-      <main class="dot-pattern flex-1 overflow-y-auto p-3 sm:p-6" style="max-height: calc(100vh - 56px)">
+    <div v-else-if="activeTab === 'ranking'" key="ranking" class="flex flex-1 relative z-10" style="padding-top: calc(3.5rem + env(safe-area-inset-top, 0px));">
+      <main class="dot-pattern flex-1 overflow-y-auto p-3 sm:p-6" style="max-height: calc(100dvh - 3.5rem - env(safe-area-inset-top, 0px))">
         <RankingView
           :actives="actives"
           :watchlist="watchlist"

@@ -118,7 +118,8 @@ function getIndicatorTop(list, idx) { return idx * 44 + 'px' }
   </Transition>
 
   <aside
-    class="glass-sidebar w-72 fixed top-14 right-0 bottom-0 z-30 flex flex-col transition-transform duration-300 lg:translate-x-0"
+    class="glass-sidebar w-72 fixed right-0 bottom-0 z-30 flex flex-col transition-transform duration-300 lg:translate-x-0"
+    style="top: calc(3.5rem + env(safe-area-inset-top, 0px));"
     :class="open ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'"
   >
     <!-- Sidebar header -->

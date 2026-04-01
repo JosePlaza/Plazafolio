@@ -51,7 +51,7 @@ onMounted(fetchStats)
 </script>
 
 <template>
-  <header class="glass-header fixed top-0 left-0 right-0 z-40 h-14 flex items-center px-3 sm:px-5">
+  <header class="glass-header fixed top-0 left-0 right-0 z-40 flex items-end px-3 sm:px-5 pb-2">
     <!-- Logo -->
     <div class="flex items-center gap-2 sm:gap-3">
       <img src="/plaza.svg" alt="Plazafolio" class="w-7 h-7 sm:w-8 sm:h-8" />
