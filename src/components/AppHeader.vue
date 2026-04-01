@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 
 defineProps({
   activeTab: { type: String, default: 'analysis' },
@@ -13,41 +13,22 @@ const tabs = [
   { id: 'ranking', label: 'Ranking' },
 ]
 
-const dbStats = ref(null)
+// ── User dropdown ──
+const showUserMenu = ref(false)
 
-function formatBytes(bytes) {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+function onDocClick(e) {
+  if (showUserMenu.value && !e.target.closest('.user-menu-wrapper')) {
+    showUserMenu.value = false
+  }
 }
 
-const usedLabel = computed(() => dbStats.value ? formatBytes(dbStats.value.usedBytes) : '–')
-const maxLabel = computed(() => dbStats.value ? formatBytes(dbStats.value.maxBytes) : '–')
-const percent = computed(() => dbStats.value ? dbStats.value.percent : 0)
+onMounted(() => document.addEventListener('click', onDocClick))
+onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
-const barColor = computed(() => {
-  if (percent.value > 85) return '#f87171'   // red
-  if (percent.value > 60) return '#fbbf24'   // amber
-  return '#34d399'                            // green
-})
-
-function fetchStats() {
-  try {
-    const MAX_BYTES = 5 * 1024 * 1024 // 5 MB localStorage limit
-    let totalBytes = 0
-    for (const key of ['plazafolio-assets', 'plazafolio-analysis']) {
-      const val = localStorage.getItem(key)
-      if (val) totalBytes += val.length * 2 // UTF-16
-    }
-    dbStats.value = {
-      usedBytes: totalBytes,
-      maxBytes: MAX_BYTES,
-      percent: Math.round((totalBytes / MAX_BYTES) * 1000) / 10,
-    }
-  } catch { /* ignore */ }
+function handleSignOut() {
+  showUserMenu.value = false
+  emit('sign-out')
 }
-
-onMounted(fetchStats)
 </script>
 
 <template>
@@ -75,42 +56,61 @@ onMounted(fetchStats)
     <!-- Spacer -->
     <div class="flex-1"></div>
 
-    <!-- Sign out -->
-    <button
-      class="hidden md:flex items-center justify-center w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-colors mr-2"
-      @click="emit('sign-out')"
-      title="Cerrar sesión"
-    >
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
-      </svg>
-    </button>
-
-    <!-- DB storage indicator (hidden on mobile) -->
-    <div v-if="dbStats" class="hidden md:flex items-center gap-2.5" :title="`${usedLabel} / ${maxLabel}`">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-500 flex-shrink-0">
-        <ellipse cx="12" cy="5" rx="9" ry="3" />
-        <path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" />
-        <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
-      </svg>
-      <div class="relative" style="width: 56px; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.06);">
-        <div
-          class="absolute inset-y-0 left-0 rounded-full transition-all duration-700"
-          :style="{ width: Math.max(percent, 2) + '%', background: barColor }"
-        ></div>
-      </div>
-      <span class="text-zinc-500 text-[10px] font-medium tabular-nums" style="min-width: 32px;">{{ percent }}%</span>
-    </div>
-
     <!-- Sidebar toggle (mobile only, analysis tab only) -->
     <button
       v-if="activeTab === 'analysis'"
-      class="lg:hidden gw-btn-icon w-9 h-9 ml-2"
+      class="gw-btn-icon w-9 h-9 lg:hidden!"
       @click="emit('toggle-sidebar')"
       title="Portfolio"
     >
       <svg v-if="!sidebarOpen" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><polyline points="7.5 3 7.5 16.5 12 13.5 16.5 16.5 16.5 3" /></svg>
       <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
     </button>
+
+    <!-- User menu -->
+    <div class="relative user-menu-wrapper ml-2">
+      <button
+        class="flex items-center justify-center w-9 h-9 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-white/5 transition-colors"
+        @click.stop="showUserMenu = !showUserMenu"
+        title="Cuenta"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <circle cx="12" cy="10" r="3" />
+          <path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662" />
+        </svg>
+      </button>
+
+      <!-- Dropdown -->
+      <Transition name="dropdown-fade">
+        <div
+          v-if="showUserMenu"
+          class="absolute right-0 top-full mt-2 z-50 w-44 rounded-xl overflow-hidden"
+          style="background: rgba(14, 14, 22, 0.95); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 12px 40px rgba(0,0,0,0.5);"
+        >
+          <button
+            class="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-zinc-300 hover:bg-white/5 transition-colors"
+            @click="handleSignOut"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            Cerrar sesión
+          </button>
+        </div>
+      </Transition>
+    </div>
   </header>
 </template>
+
+<style scoped>
+.dropdown-fade-enter-active,
+.dropdown-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.dropdown-fade-enter-from,
+.dropdown-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+</style>

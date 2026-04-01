@@ -100,3 +100,35 @@ create policy "Users delete own analyses"
 -- 6. Service role policy for cron/edge functions
 -- The service_role key bypasses RLS, so no extra policy needed.
 -- Edge Functions use SUPABASE_SERVICE_ROLE_KEY to update all users' analyses.
+
+-- ============================================================================
+-- 7. CRON: Run update-analyses every 8 hours
+--    IMPORTANT: Before running this, ensure:
+--    a) pg_cron and pg_net extensions are enabled (Database > Extensions in dashboard)
+--    b) The Edge Function is deployed:
+--       supabase functions deploy update-analyses --no-verify-jwt
+--    c) Replace YOUR_PROJECT_REF and YOUR_SERVICE_ROLE_KEY below
+-- ============================================================================
+
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+-- Remove previous schedule if exists
+select cron.unschedule('update-analyses-periodic')
+  where exists (select 1 from cron.job where jobname = 'update-analyses-periodic');
+
+-- Schedule every 8 hours (00:00, 08:00, 16:00 UTC)
+select cron.schedule(
+  'update-analyses-periodic',
+  '0 */8 * * *',
+  $$
+  select net.http_post(
+    url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/update-analyses',
+    headers := jsonb_build_object(
+      'Authorization', 'Bearer YOUR_SERVICE_ROLE_KEY',
+      'Content-Type', 'application/json'
+    ),
+    body := '{}'::jsonb
+  );
+  $$
+);

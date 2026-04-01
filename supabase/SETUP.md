@@ -54,28 +54,10 @@ supabase secrets set FMP_API_KEY=your-fmp-api-key
 
 In the Supabase dashboard, go to **SQL Editor** and run:
 
-```sql
--- Enable the pg_cron extension (if not already enabled)
-create extension if not exists pg_cron;
+The cron schedule is already included at the bottom of `schema.sql` (section 7).
+Before running it, replace `YOUR_PROJECT_REF` and `YOUR_SERVICE_ROLE_KEY` with your actual values.
 
--- Schedule daily update at 06:00 UTC (after US market close)
-select cron.schedule(
-  'update-analyses-daily',
-  '0 6 * * *',
-  $$
-  select net.http_post(
-    url := 'https://your-project.supabase.co/functions/v1/update-analyses',
-    headers := jsonb_build_object(
-      'Authorization', 'Bearer ' || 'your-service-role-key',
-      'Content-Type', 'application/json'
-    ),
-    body := '{}'::jsonb
-  );
-  $$
-);
-```
-
-Replace `your-project` and `your-service-role-key` with your actual values.
+It runs every 8 hours (00:00, 08:00, 16:00 UTC).
 
 ### Verify Cron
 
