@@ -13,7 +13,6 @@ const showInfo = ref(false)
     <!-- Info toggle button -->
     <button
       class="absolute top-0 right-0 z-20 w-6 h-6 flex items-center justify-center rounded-full text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-colors"
-      style="margin-top: -8px; margin-right: -8px;"
       @click.stop="showInfo = !showInfo"
     >
       <svg v-if="!showInfo" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

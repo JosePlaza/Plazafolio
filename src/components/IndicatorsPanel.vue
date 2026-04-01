@@ -7,6 +7,7 @@ const props = defineProps({
   projection: { type: Object, default: null },
   dividends: { type: Array, default: () => [] },
   currency: { type: String, default: '$' },
+  freshLabel: { type: String, default: '' },
 })
 
 function fmt(value, decimals = 2) {
@@ -126,13 +127,16 @@ const recommendation = computed(() => {
 </script>
 
 <template>
-  <div v-if="indicators" class="h-full flex flex-col">
-    <!-- Title -->
-    <div
-      class="font-semibold tracking-[0.05em] uppercase mb-4"
-      style="color: #e4e4e7; font-size: 13px; font-family: Inter, system-ui, sans-serif;"
-    >
-      Indicadores
+  <div v-if="indicators" class="h-full flex flex-col pt-2.5 pl-1.5">
+    <!-- Title + subtitle (matching Highcharts spacing) -->
+    <div class="mb-4">
+      <div
+        class="font-semibold tracking-[0.05em] uppercase"
+        style="color: #e4e4e7; font-size: 13px;"
+      >
+        Indicadores
+      </div>
+      <div v-if="freshLabel" class="mt-0.5" style="color: #71717a; font-size: 10px;">{{ freshLabel }}</div>
     </div>
 
     <!-- Indicators grid -->

@@ -217,8 +217,7 @@ function onRankingSelect(asset) {
           <!-- Row 1: KPIs (glass card) + Tesis chart -->
           <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
             <div class="lg:col-span-4 glass-card p-4">
-              <IndicatorsPanel :indicators="data.indicators" :projection="data.projection" :dividends="data.dividends" :currency="currency" />
-              <div v-if="freshLabels.price" class="fresh-inline">{{ freshLabels.price }}</div>
+              <IndicatorsPanel :indicators="data.indicators" :projection="data.projection" :dividends="data.dividends" :currency="currency" :fresh-label="freshLabels.price" />
             </div>
             <div class="lg:col-span-8 glass-card p-4">
               <GeraldineChart :price-bands="data.priceBands" :ticker="ticker" :currency="currency" :fresh-label="freshLabels.price" />
@@ -330,11 +329,3 @@ function onRankingSelect(asset) {
   </div>
 </template>
 
-<style scoped>
-.fresh-inline {
-  color: #71717a;
-  font-size: 10px;
-  font-weight: 400;
-  padding-top: 8px;
-}
-</style>
