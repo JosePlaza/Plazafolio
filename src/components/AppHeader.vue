@@ -31,11 +31,20 @@ const barColor = computed(() => {
   return '#34d399'                            // green
 })
 
-async function fetchStats() {
+function fetchStats() {
   try {
-    const r = await fetch('http://localhost:3001/api/db-stats')
-    if (r.ok) dbStats.value = await r.json()
-  } catch { /* server offline */ }
+    const MAX_BYTES = 5 * 1024 * 1024 // 5 MB localStorage limit
+    let totalBytes = 0
+    for (const key of ['plazafolio-assets', 'plazafolio-analysis']) {
+      const val = localStorage.getItem(key)
+      if (val) totalBytes += val.length * 2 // UTF-16
+    }
+    dbStats.value = {
+      usedBytes: totalBytes,
+      maxBytes: MAX_BYTES,
+      percent: Math.round((totalBytes / MAX_BYTES) * 1000) / 10,
+    }
+  } catch { /* ignore */ }
 }
 
 onMounted(fetchStats)

@@ -1,0 +1,27 @@
+{
+  "buildCommand": "vite build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    { "source": "/api/prices", "destination": "/api/prices" },
+    { "source": "/api/dividends", "destination": "/api/dividends" },
+    { "source": "/api/profile", "destination": "/api/profile" },
+    { "source": "/api/cashflow", "destination": "/api/cashflow" },
+    { "source": "/api/fundamentals", "destination": "/api/fundamentals" },
+    { "source": "/api/search", "destination": "/api/search" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "s-maxage=300, stale-while-revalidate=600" }
+      ]
+    }
+  ]
+}
