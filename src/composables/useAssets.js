@@ -27,6 +27,7 @@ export function useAssets() {
   async function addAsset(ticker, name, category, price, image) {
     try {
       const asset = await apiAddAsset({ ticker, name, category, price, image })
+      if (!asset) return null // duplicate
       if (category === 'actives') actives.value.push(asset)
       else watchlist.value.push(asset)
       return asset

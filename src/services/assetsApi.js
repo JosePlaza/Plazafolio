@@ -35,11 +35,17 @@ export async function getAssets() {
 
 export async function addAsset(asset) {
   const db = readAssets()
+  const tickerUp = asset.ticker.toUpperCase()
+
+  // Prevent duplicates
+  const exists = [...db.actives, ...db.watchlist].some(a => a.ticker === tickerUp)
+  if (exists) return null
+
   const id = Date.now().toString(36) + Math.random().toString(36).substr(2, 5)
   const newAsset = {
     id,
-    ticker: asset.ticker.toUpperCase(),
-    name: asset.name || asset.ticker.toUpperCase(),
+    ticker: tickerUp,
+    name: asset.name || tickerUp,
     category: asset.category,
     price: asset.price || 0,
     image: asset.image || null,
