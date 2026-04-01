@@ -6,7 +6,7 @@ defineProps({
   sidebarOpen: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:activeTab', 'toggle-sidebar'])
+const emit = defineEmits(['update:activeTab', 'toggle-sidebar', 'sign-out'])
 
 const tabs = [
   { id: 'analysis', label: 'Análisis' },
@@ -74,6 +74,17 @@ onMounted(fetchStats)
 
     <!-- Spacer -->
     <div class="flex-1"></div>
+
+    <!-- Sign out -->
+    <button
+      class="hidden md:flex items-center justify-center w-8 h-8 rounded-lg text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-colors mr-2"
+      @click="emit('sign-out')"
+      title="Cerrar sesión"
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+      </svg>
+    </button>
 
     <!-- DB storage indicator (hidden on mobile) -->
     <div v-if="dbStats" class="hidden md:flex items-center gap-2.5" :title="`${usedLabel} / ${maxLabel}`">

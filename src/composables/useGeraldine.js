@@ -93,19 +93,15 @@ export function useGeraldine() {
   /**
    * Guarda el resultado del análisis en el servidor
    */
-  async function saveToCache(tickerSymbol, periodYears, result, profile, cashFlow, fundamentals) {
+  async function saveToCache(tickerSymbol, periodYears, result, profile) {
     try {
+      // Only save lightweight data needed for ranking + cache check.
+      // Heavy chart data (priceBands, dailyYields, drawdown) is NOT cached
+      // to avoid blowing localStorage limits.
       await saveCachedAnalysis(tickerSymbol, periodYears, {
         indicators: result.indicators,
-        priceBands: result.priceBands,
-        dailyYields: result.dailyYields,
-        yearlyData: result.yearlyData,
-        dividends: result.dividends,
-        trailingDividends: result.trailingDividends,
-        drawdown: result.drawdown,
         projection: result.projection,
-        cashFlow: cashFlow || [],
-        fundamentals: fundamentals || null,
+        dividends: result.dividends,
       }, profile)
     } catch (err) {
       console.warn('Error guardando análisis en cache:', err.message)
@@ -132,30 +128,36 @@ export function useGeraldine() {
       const cached = await getCachedAnalysis(ticker.value)
 
       if (cached && cached.data && cached.years === periodYears) {
-        // Apply cached data immediately
-        applyData(cached.data, cached.profile, cached.data.cashFlow, cached.data.fundamentals)
-
         if (cached.lastUpdated === today) {
-          // Cache is from today — don't re-fetch
+          // Cache is from today — still need full chart data from APIs
+          // but use cached profile to save an API call
+          loading.value = true
+          try {
+            const { result, profile, cashFlow, fundamentals } = await fetchAndCompute(ticker.value, periodYears, cached.profile)
+            applyData(result, profile, cashFlow, fundamentals)
+          } catch (err) {
+            console.error('Error generando análisis:', err)
+            error.value = err.message || 'Error al obtener datos'
+            resetData()
+          } finally {
+            loading.value = false
+          }
           return
         }
 
-        // Cache is stale (from a previous day) — refresh in background
-        const tickerToRefresh = ticker.value // capture before async
-        refreshing.value = true
-        fetchAndCompute(tickerToRefresh, periodYears, cached.profile)
-          .then(({ result, profile, cashFlow, fundamentals }) => {
-            if (ticker.value === tickerToRefresh) {
-              applyData(result, profile, cashFlow, fundamentals)
-            }
-            saveToCache(tickerToRefresh, periodYears, result, profile, cashFlow, fundamentals)
-          })
-          .catch((err) => {
-            console.warn('Error al actualizar datos en segundo plano:', err.message)
-          })
-          .finally(() => {
-            refreshing.value = false
-          })
+        // Cache is stale — full refresh, save new cache
+        loading.value = true
+        try {
+          const { result, profile, cashFlow, fundamentals } = await fetchAndCompute(ticker.value, periodYears)
+          applyData(result, profile, cashFlow, fundamentals)
+          await saveToCache(ticker.value, periodYears, result, profile)
+        } catch (err) {
+          console.error('Error generando análisis:', err)
+          error.value = err.message || 'Error al obtener datos'
+          resetData()
+        } finally {
+          loading.value = false
+        }
         return
       }
     } catch (err) {
@@ -168,7 +170,7 @@ export function useGeraldine() {
     try {
       const { result, profile, cashFlow, fundamentals } = await fetchAndCompute(ticker.value, periodYears)
       applyData(result, profile, cashFlow, fundamentals)
-      await saveToCache(ticker.value, periodYears, result, profile, cashFlow, fundamentals)
+      await saveToCache(ticker.value, periodYears, result, profile)
     } catch (err) {
       console.error('Error generando análisis:', err)
       error.value = err.response?.data?.['Error Message'] || err.message || 'Error al obtener datos'

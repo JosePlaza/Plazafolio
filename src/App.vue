@@ -1,8 +1,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useAuth } from '@/composables/useAuth'
 import { useGeraldine } from '@/composables/useGeraldine'
 import { useAssets } from '@/composables/useAssets'
 import { getCompanyProfile } from '@/services/fmpApi'
+import AuthView from '@/components/AuthView.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import AddAssetModal from '@/components/AddAssetModal.vue'
@@ -24,6 +26,7 @@ import DebtChart from '@/components/charts/DebtChart.vue'
 import SharesChart from '@/components/charts/SharesChart.vue'
 import RankingView from '@/components/RankingView.vue'
 
+const { user, loading: authLoading, init: initAuth, signOut } = useAuth()
 const { loading, refreshing, error, ticker, data, hasData, currency, generate } = useGeraldine()
 const { actives, watchlist, load: loadAssets, addAsset, moveAsset, removeAsset } = useAssets()
 
@@ -70,7 +73,8 @@ const freshLabels = computed(() => {
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
+  await initAuth()
   loadAssets()
 })
 
@@ -133,14 +137,23 @@ function onRankingSelect(asset) {
 </script>
 
 <template>
-  <div class="h-screen flex flex-col relative">
+  <!-- Auth loading -->
+  <div v-if="authLoading" class="h-dvh flex items-center justify-center bg-background">
+    <div class="spinner" style="width: 32px; height: 32px;"></div>
+  </div>
+
+  <!-- Login / Register -->
+  <AuthView v-else-if="!user" @authenticated="loadAssets()" />
+
+  <!-- Authenticated app -->
+  <div v-else class="h-screen flex flex-col relative">
     <!-- Background blobs -->
     <div class="bg-blobs">
       <div class="bg-blob-3" />
     </div>
 
     <!-- Header -->
-    <AppHeader :active-tab="activeTab" :sidebar-open="sidebarOpen" @update:active-tab="activeTab = $event" @toggle-sidebar="sidebarOpen = !sidebarOpen" />
+    <AppHeader :active-tab="activeTab" :sidebar-open="sidebarOpen" @update:active-tab="activeTab = $event" @toggle-sidebar="sidebarOpen = !sidebarOpen" @sign-out="signOut" />
 
     <!-- ═══ Views with fade transition ═══ -->
     <Transition name="view-fade" mode="out-in">
