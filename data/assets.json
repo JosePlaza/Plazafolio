@@ -1,0 +1,310 @@
+{
+  "actives": [
+    {
+      "id": "mna8qeofigqy4",
+      "ticker": "NKE",
+      "name": "NIKE, Inc.",
+      "category": "actives",
+      "price": 51.37,
+      "image": "https://images.financialmodelingprep.com/symbol/NKE.png"
+    },
+    {
+      "id": "mnaa0pvnv90f8",
+      "ticker": "APLE",
+      "name": "Apple Hospitality REIT, Inc.",
+      "category": "actives",
+      "price": 11.49,
+      "image": "https://images.financialmodelingprep.com/symbol/APLE.png"
+    },
+    {
+      "id": "mna9sjz9zsjjs",
+      "ticker": "BAM",
+      "name": "Brookfield Asset Management Ltd.",
+      "category": "actives",
+      "price": 43.18,
+      "image": "https://images.financialmodelingprep.com/symbol/BAM.png"
+    },
+    {
+      "id": "mna9orofsw8va",
+      "ticker": "O",
+      "name": "Realty Income Corporation",
+      "category": "actives",
+      "price": 60.69,
+      "image": "https://images.financialmodelingprep.com/symbol/O.png"
+    },
+    {
+      "id": "mnaht5kimlw2b",
+      "ticker": "MAIN",
+      "name": "Main Street Capital Corporation",
+      "category": "actives",
+      "price": 51.53,
+      "image": "https://images.financialmodelingprep.com/symbol/MAIN.png"
+    },
+    {
+      "id": "mnahtiqt23a3v",
+      "ticker": "LTC",
+      "name": "LTC Properties, Inc.",
+      "category": "actives",
+      "price": 37.24,
+      "image": "https://images.financialmodelingprep.com/symbol/LTC.png"
+    },
+    {
+      "id": "mnae98ti43r7f",
+      "ticker": "EPR",
+      "name": "EPR Properties",
+      "category": "actives",
+      "price": 48.71,
+      "image": "https://images.financialmodelingprep.com/symbol/EPR.png"
+    },
+    {
+      "id": "mnahyiuiwtakk",
+      "ticker": "KHNZ.DE",
+      "name": "The Kraft Heinz Company",
+      "category": "actives",
+      "price": 19.306,
+      "image": "https://images.financialmodelingprep.com/symbol/KHNZ.DE.png"
+    }
+  ],
+  "watchlist": [
+    {
+      "id": "mnaiwaq4thqfa",
+      "ticker": "ABBV",
+      "name": "AbbVie Inc.",
+      "category": "watchlist",
+      "price": 209.36501,
+      "image": "https://images.financialmodelingprep.com/symbol/ABBV.png"
+    },
+    {
+      "id": "mnaixu1ophyw1",
+      "ticker": "MO",
+      "name": "Altria Group, Inc.",
+      "category": "watchlist",
+      "price": 66.48,
+      "image": "https://images.financialmodelingprep.com/symbol/MO.png"
+    },
+    {
+      "id": "mnaiz3g0yczbf",
+      "ticker": "RED.MC",
+      "name": "Redeia Corporación, S.A.",
+      "category": "watchlist",
+      "price": 14.21,
+      "image": "https://images.financialmodelingprep.com/symbol/RED.MC.png"
+    },
+    {
+      "id": "mnaizejeqsbwe",
+      "ticker": "IBE.MC",
+      "name": "Iberdrola, S.A.",
+      "category": "watchlist",
+      "price": 19.125,
+      "image": "https://images.financialmodelingprep.com/symbol/IBE.MC.png"
+    },
+    {
+      "id": "mnaj07w9kfni3",
+      "ticker": "FTS",
+      "name": "Fortis Inc.",
+      "category": "watchlist",
+      "price": 55.66,
+      "image": "https://images.financialmodelingprep.com/symbol/FTS.png"
+    },
+    {
+      "id": "mnaj0nz678cdr",
+      "ticker": "DUK",
+      "name": "Duke Energy Corporation",
+      "category": "watchlist",
+      "price": 129.96,
+      "image": "https://images.financialmodelingprep.com/symbol/DUK.png"
+    },
+    {
+      "id": "mnakgyyudrs8n",
+      "ticker": "BTI",
+      "name": "British American Tobacco p.l.c.",
+      "category": "watchlist",
+      "price": 57.8,
+      "image": "https://images.financialmodelingprep.com/symbol/BTI.png"
+    },
+    {
+      "id": "mnaklzo8gw2dm",
+      "ticker": "NGG",
+      "name": "National Grid plc",
+      "category": "watchlist",
+      "price": 81.92,
+      "image": "https://images.financialmodelingprep.com/symbol/NGG.png"
+    },
+    {
+      "id": "mnaod95m7ozj0",
+      "ticker": "UL",
+      "name": "Unilever PLC",
+      "category": "watchlist",
+      "price": 59.37,
+      "image": "https://images.financialmodelingprep.com/symbol/UL.png"
+    },
+    {
+      "id": "mnaoe29v4pjds",
+      "ticker": "ENB",
+      "name": "Enbridge Inc.",
+      "category": "watchlist",
+      "price": 54.58,
+      "image": "https://images.financialmodelingprep.com/symbol/ENB.png"
+    },
+    {
+      "id": "mnaoele2i2d2k",
+      "ticker": "JNJ",
+      "name": "Johnson & Johnson",
+      "category": "watchlist",
+      "price": 240.45,
+      "image": "https://images.financialmodelingprep.com/symbol/JNJ.png"
+    },
+    {
+      "id": "mnaof4kceecnn",
+      "ticker": "GSK",
+      "name": "GSK plc",
+      "category": "watchlist",
+      "price": 53.84,
+      "image": "https://images.financialmodelingprep.com/symbol/GSK.png"
+    },
+    {
+      "id": "mnaoff2vieffk",
+      "ticker": "BMY",
+      "name": "Bristol-Myers Squibb Company",
+      "category": "watchlist",
+      "price": 58.54,
+      "image": "https://images.financialmodelingprep.com/symbol/BMY.png"
+    },
+    {
+      "id": "mnaofnwbcwe6d",
+      "ticker": "VZ",
+      "name": "Verizon Communications Inc.",
+      "category": "watchlist",
+      "price": 50.31,
+      "image": "https://images.financialmodelingprep.com/symbol/VZ.png"
+    },
+    {
+      "id": "mnaog4vtho0u0",
+      "ticker": "T",
+      "name": "AT&T Inc.",
+      "category": "watchlist",
+      "price": 29.095,
+      "image": "https://images.financialmodelingprep.com/symbol/T.png"
+    },
+    {
+      "id": "mnaogmrsi6rd0",
+      "ticker": "TROW",
+      "name": "T. Rowe Price Group, Inc.",
+      "category": "watchlist",
+      "price": 88.45,
+      "image": "https://images.financialmodelingprep.com/symbol/TROW.png"
+    },
+    {
+      "id": "mnaoh3uj5tqzd",
+      "ticker": "MAP.MC",
+      "name": "Mapfre, S.A.",
+      "category": "watchlist",
+      "price": 3.734,
+      "image": "https://images.financialmodelingprep.com/symbol/MAP.MC.png"
+    },
+    {
+      "id": "mnaohefi5yd9n",
+      "ticker": "PRU",
+      "name": "Prudential Financial, Inc.",
+      "category": "watchlist",
+      "price": 93.29,
+      "image": "https://images.financialmodelingprep.com/symbol/PRU.png"
+    },
+    {
+      "id": "mnaohovhx46ef",
+      "ticker": "CVX",
+      "name": "Chevron Corporation",
+      "category": "watchlist",
+      "price": 211.135,
+      "image": "https://images.financialmodelingprep.com/symbol/CVX.png"
+    },
+    {
+      "id": "mnaohvzv5adjg",
+      "ticker": "TGT",
+      "name": "Target Corporation",
+      "category": "watchlist",
+      "price": 119.8,
+      "image": "https://images.financialmodelingprep.com/symbol/TGT.png"
+    },
+    {
+      "id": "mnaoihom1e9o1",
+      "ticker": "LOG.MC",
+      "name": "Logista Integral, S.A.",
+      "category": "watchlist",
+      "price": 31.76,
+      "image": "https://images.financialmodelingprep.com/symbol/LOG.MC.png"
+    },
+    {
+      "id": "mnaoiq9kyizbg",
+      "ticker": "WPC",
+      "name": "W. P. Carey Inc.",
+      "category": "watchlist",
+      "price": 67.61,
+      "image": "https://images.financialmodelingprep.com/symbol/WPC.png"
+    },
+    {
+      "id": "mnaoj04ts6fm2",
+      "ticker": "CTRE",
+      "name": "CareTrust REIT, Inc.",
+      "category": "watchlist",
+      "price": 37.13,
+      "image": "https://images.financialmodelingprep.com/symbol/CTRE.png"
+    },
+    {
+      "id": "mnc2al86ucshq",
+      "ticker": "MDLZ",
+      "name": "Mondelez International, Inc.",
+      "category": "watchlist",
+      "price": 58.27,
+      "image": "https://images.financialmodelingprep.com/symbol/MDLZ.png"
+    },
+    {
+      "id": "mnc2bu9uys54a",
+      "ticker": "KO",
+      "name": "The Coca-Cola Company",
+      "category": "watchlist",
+      "price": 75.71,
+      "image": "https://images.financialmodelingprep.com/symbol/KO.png"
+    },
+    {
+      "id": "mnc2d4mtyjqss",
+      "ticker": "PG",
+      "name": "The Procter & Gamble Company",
+      "category": "watchlist",
+      "price": 142.58,
+      "image": "https://images.financialmodelingprep.com/symbol/PG.png"
+    },
+    {
+      "id": "mnc45d0g6wc0f",
+      "ticker": "DX",
+      "name": "Dynex Capital, Inc.",
+      "category": "watchlist",
+      "price": 12.17,
+      "image": "https://images.financialmodelingprep.com/symbol/DX.png"
+    },
+    {
+      "id": "mnc47ygg363qy",
+      "ticker": "UPS",
+      "name": "United Parcel Service, Inc.",
+      "category": "watchlist",
+      "price": 94.78,
+      "image": "https://images.financialmodelingprep.com/symbol/UPS.png"
+    },
+    {
+      "id": "mnc4avdfv508l",
+      "ticker": "EQNR",
+      "name": "Equinor ASA",
+      "category": "watchlist",
+      "price": 41.53,
+      "image": "https://images.financialmodelingprep.com/symbol/EQNR.png"
+    },
+    {
+      "id": "mnc4cd12epice",
+      "ticker": "TTE",
+      "name": "TotalEnergies SE",
+      "category": "watchlist",
+      "price": 89.87,
+      "image": "https://images.financialmodelingprep.com/symbol/TTE.png"
+    }
+  ]
+}

@@ -1,0 +1,500 @@
+<script setup>
+import { ref, computed, onMounted, watch, onBeforeUnmount } from 'vue'
+import { getAllCachedAnalyses } from '@/services/assetsApi'
+import { computeBuyScore } from '@/lib/scoring'
+import { getCurrencySymbol } from '@/lib/currency'
+
+const props = defineProps({
+  actives: { type: Array, default: () => [] },
+  watchlist: { type: Array, default: () => [] },
+  visible: { type: Boolean, default: false },
+})
+
+const emit = defineEmits(['select-asset'])
+
+const analyses = ref({})
+const loadingRanking = ref(false)
+const showScoringInfo = ref(false)
+
+const allAssets = computed(() => [...props.actives, ...props.watchlist])
+
+// Build ranked list combining asset info with analysis scores
+const rankedAssets = computed(() => {
+  return allAssets.value
+    .map((asset) => {
+      const cached = analyses.value[asset.ticker]
+      if (!cached || !cached.data) {
+        return {
+          ...asset,
+          score: null,
+          scoring: null,
+          indicators: null,
+          projection: null,
+          category: asset.category || (props.actives.find(a => a.id === asset.id) ? 'actives' : 'watchlist'),
+        }
+      }
+      const { indicators } = cached.data
+      const projection = cached.data.projection
+      const dividends = cached.data.dividends
+      const scoring = computeBuyScore(indicators, projection, dividends)
+      return {
+        ...asset,
+        score: scoring.score,
+        scoring,
+        indicators,
+        projection,
+        currency: getCurrencySymbol(asset.ticker),
+        category: asset.category || (props.actives.find(a => a.id === asset.id) ? 'actives' : 'watchlist'),
+      }
+    })
+    .sort((a, b) => {
+      if (a.score == null && b.score == null) return 0
+      if (a.score == null) return 1
+      if (b.score == null) return -1
+      return b.score - a.score
+    })
+})
+
+async function loadAnalyses() {
+  loadingRanking.value = true
+  try {
+    const data = await getAllCachedAnalyses()
+    analyses.value = data || {}
+  } catch (err) {
+    console.error('Error loading analyses for ranking:', err)
+  } finally {
+    loadingRanking.value = false
+  }
+}
+
+// Load when becomes visible
+watch(() => props.visible, (val) => {
+  if (val) loadAnalyses()
+})
+
+onMounted(() => {
+  if (props.visible) loadAnalyses()
+})
+
+// Close popover on outside click
+function onDocClick(e) {
+  if (showScoringInfo.value && !e.target.closest('.scoring-popover-wrapper')) {
+    showScoringInfo.value = false
+  }
+}
+onMounted(() => document.addEventListener('click', onDocClick))
+onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
+
+function heatColor(heat) {
+  const colors = {
+    5: '#34d399',
+    4: '#6ee7b7',
+    3: '#fbbf24',
+    2: '#fb923c',
+    1: '#f87171',
+    0: '#ef4444',
+  }
+  return colors[heat] ?? '#71717a'
+}
+
+function heatBg(heat) { return heatColor(heat) + '15' }
+function heatBorder(heat) { return heatColor(heat) + '30' }
+function scoreBarWidth(score) { return Math.max(0, Math.min(100, score || 0)) + '%' }
+function scoreBarGradient(heat) { const c = heatColor(heat); return `linear-gradient(90deg, ${c}40, ${c})` }
+function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return Number(val).toFixed(dec) }
+</script>
+
+<template>
+  <div class="max-w-5xl mx-auto">
+    <!-- Title -->
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h2 class="text-xl font-bold text-foreground tracking-tight">Ranking de Activos</h2>
+        <p class="text-muted-foreground text-xs mt-0.5">Prioridad de compra según método Geraldine Weiss</p>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <!-- Scoring info button + popover -->
+        <div class="relative scoring-popover-wrapper">
+          <button
+            class="gw-btn-icon"
+            title="Cómo se calcula el scoring"
+            @click.stop="showScoringInfo = !showScoringInfo"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4" />
+              <path d="M12 8h.01" />
+            </svg>
+          </button>
+
+          <!-- Popover -->
+          <Transition name="pop-fade">
+            <div
+              v-if="showScoringInfo"
+              class="absolute right-0 top-full mt-2 z-50 w-80"
+              style="background: rgba(14, 14, 22, 0.95); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.5);"
+            >
+              <div class="p-4">
+                <h3 class="text-xs font-semibold text-foreground uppercase tracking-wider mb-3">Cómo se calcula el Score</h3>
+                <p class="text-[11px] text-zinc-400 leading-relaxed mb-3">
+                  El score (0-100) combina 4 factores según el método Geraldine Weiss para determinar la prioridad de compra.
+                </p>
+
+                <!-- Factor 1 -->
+                <div class="mb-3">
+                  <div class="flex items-center justify-between mb-0.5">
+                    <span class="text-[10px] font-semibold text-zinc-300">Y · Posición del Yield</span>
+                    <span class="text-[9px] text-primary font-bold">0 – 70 pts</span>
+                  </div>
+                  <p class="text-[10px] text-zinc-500 leading-relaxed">
+                    Mide dónde está el yield actual dentro del rango histórico. Yield cerca o por encima del promedio alto = zona de compra (50-70 pts). Cerca del bajo = zona cara (0-15 pts).
+                  </p>
+                </div>
+
+                <!-- Factor 2 -->
+                <div class="mb-3">
+                  <div class="flex items-center justify-between mb-0.5">
+                    <span class="text-[10px] font-semibold text-zinc-300">C · Crecimiento CAGR</span>
+                    <span class="text-[9px] text-primary font-bold">0 – 15 pts</span>
+                  </div>
+                  <p class="text-[10px] text-zinc-500 leading-relaxed">
+                    Premia el crecimiento sostenido del dividendo. CAGR 5% ≈ 7.5 pts, 10% ≈ 12.5 pts, 15%+ = 15 pts. CAGR negativo penaliza hasta -5 pts.
+                  </p>
+                </div>
+
+                <!-- Factor 3 -->
+                <div class="mb-3">
+                  <div class="flex items-center justify-between mb-0.5">
+                    <span class="text-[10px] font-semibold text-zinc-300">S · Consistencia</span>
+                    <span class="text-[9px] text-primary font-bold">0 – 10 pts</span>
+                  </div>
+                  <p class="text-[10px] text-zinc-500 leading-relaxed">
+                    Años consecutivos pagando dividendo. 5 años = 5 pts, 10+ años = 10 pts. Más años = empresa más fiable.
+                  </p>
+                </div>
+
+                <!-- Factor 4 -->
+                <div class="mb-3">
+                  <div class="flex items-center justify-between mb-0.5">
+                    <span class="text-[10px] font-semibold text-zinc-300">M · Margen de seguridad</span>
+                    <span class="text-[9px] text-primary font-bold">0 – 5 pts</span>
+                  </div>
+                  <p class="text-[10px] text-zinc-500 leading-relaxed">
+                    Potencial alcista hasta el precio de infravaloración. 30%+ de upside = 5 pts máximo.
+                  </p>
+                </div>
+
+                <!-- Signals table -->
+                <div style="border-top: 1px solid rgba(255,255,255,0.06);" class="pt-3 mt-1">
+                  <h4 class="text-[10px] font-semibold text-zinc-300 uppercase tracking-wider mb-2">Señales</h4>
+                  <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2 h-2 rounded-full" style="background: #34d399;"></span>
+                      <span class="text-[10px] text-zinc-400">Compra fuerte</span>
+                      <span class="text-[9px] text-zinc-600 ml-auto">≥ 75</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2 h-2 rounded-full" style="background: #6ee7b7;"></span>
+                      <span class="text-[10px] text-zinc-400">Compra</span>
+                      <span class="text-[9px] text-zinc-600 ml-auto">60-74</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2 h-2 rounded-full" style="background: #fbbf24;"></span>
+                      <span class="text-[10px] text-zinc-400">Vigilar</span>
+                      <span class="text-[9px] text-zinc-600 ml-auto">45-59</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2 h-2 rounded-full" style="background: #fb923c;"></span>
+                      <span class="text-[10px] text-zinc-400">Mantener</span>
+                      <span class="text-[9px] text-zinc-600 ml-auto">30-44</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2 h-2 rounded-full" style="background: #f87171;"></span>
+                      <span class="text-[10px] text-zinc-400">Caro</span>
+                      <span class="text-[9px] text-zinc-600 ml-auto">15-29</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2 h-2 rounded-full" style="background: #ef4444;"></span>
+                      <span class="text-[10px] text-zinc-400">Vender</span>
+                      <span class="text-[9px] text-zinc-600 ml-auto">&lt; 15</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Transition>
+        </div>
+
+        <!-- Sync button -->
+        <button
+          v-if="!loadingRanking"
+          class="gw-btn-icon"
+          title="Actualizar ranking"
+          @click="loadAnalyses"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6" />
+            <path d="M2.5 22v-6h6" />
+            <path d="M2 11.5a10 10 0 0 1 18.8-4.3L21.5 8" />
+            <path d="M22 12.5a10 10 0 0 1-18.8 4.3L2.5 16" />
+          </svg>
+        </button>
+        <div v-else class="spinner" style="width: 20px; height: 20px; border-width: 2px;"></div>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div v-if="!allAssets.length && !loadingRanking" class="flex flex-col items-center justify-center py-24">
+      <p class="text-muted-foreground text-sm">No hay activos guardados</p>
+      <p class="text-muted-foreground/50 text-xs mt-1">Añade activos desde la vista de Análisis</p>
+    </div>
+
+    <!-- Skeleton loader -->
+    <div v-else-if="loadingRanking && !rankedAssets.some(a => a.scoring)" class="space-y-2 animate-pulse">
+      <div v-for="i in 6" :key="i" class="glass-card p-4">
+        <div class="flex items-center gap-4">
+          <div class="w-8 h-8 rounded-lg bg-white/[0.04]"></div>
+          <div class="w-9 h-9 rounded-lg bg-white/[0.04]"></div>
+          <div class="flex-1 space-y-2">
+            <div class="h-4 w-32 rounded bg-white/[0.05]"></div>
+            <div class="h-3 w-20 rounded bg-white/[0.03]"></div>
+          </div>
+          <div class="w-20 space-y-1.5 text-right">
+            <div class="h-2.5 w-10 rounded bg-white/[0.04] ml-auto"></div>
+            <div class="h-4 w-14 rounded bg-white/[0.05] ml-auto"></div>
+          </div>
+          <div class="w-20 space-y-1.5 text-right">
+            <div class="h-2.5 w-10 rounded bg-white/[0.04] ml-auto"></div>
+            <div class="h-4 w-14 rounded bg-white/[0.05] ml-auto"></div>
+          </div>
+          <div class="w-44 space-y-1.5">
+            <div class="flex justify-between">
+              <div class="h-3 w-16 rounded bg-white/[0.04]"></div>
+              <div class="h-3 w-6 rounded bg-white/[0.05]"></div>
+            </div>
+            <div class="h-1.5 rounded-full bg-white/[0.04]"></div>
+            <div class="flex gap-2">
+              <div class="h-2 w-6 rounded bg-white/[0.03]"></div>
+              <div class="h-2 w-6 rounded bg-white/[0.03]"></div>
+              <div class="h-2 w-6 rounded bg-white/[0.03]"></div>
+              <div class="h-2 w-6 rounded bg-white/[0.03]"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ranking list -->
+    <div v-else class="space-y-2">
+      <div
+        v-for="(item, idx) in rankedAssets"
+        :key="item.id"
+        class="glass-card p-4 cursor-pointer group"
+        @click="emit('select-asset', item)"
+      >
+        <!-- Mobile layout: position left column, content right -->
+        <div class="flex gap-3 sm:hidden">
+          <!-- Position badge pinned top-left -->
+          <div
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
+            :style="{
+              background: item.scoring ? heatBg(item.scoring.heat) : 'rgba(255,255,255,0.04)',
+              color: item.scoring ? heatColor(item.scoring.heat) : '#71717a',
+              border: '1px solid ' + (item.scoring ? heatBorder(item.scoring.heat) : 'rgba(255,255,255,0.06)'),
+            }"
+          >
+            {{ idx + 1 }}
+          </div>
+
+          <!-- Right content column -->
+          <div class="flex-1 min-w-0 flex flex-col gap-2.5">
+            <!-- Row 1: Logo + Name + Price -->
+            <div class="flex items-center gap-2.5">
+              <div v-if="item.image" class="w-9 h-9 rounded-lg overflow-hidden shrink-0 bg-white/5 p-0.5">
+                <img :src="item.image" :alt="item.ticker" class="w-full h-full object-contain rounded-md" />
+              </div>
+              <div v-else class="w-9 h-9 rounded-lg shrink-0 bg-primary/10 flex items-center justify-center">
+                <span class="text-primary text-[10px] font-bold">{{ item.ticker?.slice(0, 2) }}</span>
+              </div>
+
+              <div class="flex-1 min-w-0">
+                <div class="text-sm font-semibold text-foreground truncate">{{ item.name }}</div>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <span class="text-[10px] text-muted-foreground">{{ item.ticker }}</span>
+                  <span
+                    class="text-[9px] uppercase tracking-wider px-1.5 rounded"
+                    :class="item.category === 'actives' ? 'text-primary bg-primary/10' : 'text-muted-foreground bg-white/5'"
+                  >
+                    {{ item.category === 'actives' ? 'Activo' : 'Watchlist' }}
+                  </span>
+                </div>
+              </div>
+
+              <div v-if="item.indicators" class="text-right shrink-0">
+                <div class="text-sm font-medium text-foreground tabular-nums">{{ item.currency || '$' }}{{ fmt(item.indicators.currentPrice) }}</div>
+              </div>
+            </div>
+
+            <!-- Row 2: Score bar -->
+            <div v-if="item.scoring">
+              <div class="flex items-center justify-between mb-1">
+                <span
+                  class="text-[10px] font-semibold uppercase tracking-wider"
+                  :style="{ color: heatColor(item.scoring.heat) }"
+                >
+                  {{ item.scoring.signal }}
+                </span>
+                <span class="text-xs font-bold text-foreground">{{ item.score }}</span>
+              </div>
+              <div class="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                <div
+                  class="h-full rounded-full transition-all duration-500"
+                  :style="{
+                    width: scoreBarWidth(item.score),
+                    background: scoreBarGradient(item.scoring.heat),
+                  }"
+                ></div>
+              </div>
+            </div>
+            <div v-else>
+              <span class="text-[10px] text-muted-foreground/50">Sin análisis — analiza este activo primero</span>
+            </div>
+
+            <!-- Row 3: Metrics -->
+            <div v-if="item.scoring" class="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <div v-if="item.indicators" class="flex items-center gap-1">
+                <span class="text-[10px] uppercase" style="color: #71717a;">Yield</span>
+                <span class="text-[12px] font-bold text-primary tabular-nums">{{ fmt(item.indicators.currentYield) }}%</span>
+              </div>
+              <div v-if="item.projection" class="flex items-center gap-1">
+                <span class="text-[10px] uppercase" style="color: #71717a;">CAGR</span>
+                <span
+                  class="text-[12px] font-semibold tabular-nums"
+                  :style="{ color: item.projection.cagr >= 0 ? '#34d399' : '#f87171' }"
+                >
+                  {{ item.projection.cagr >= 0 ? '+' : '' }}{{ fmt(item.projection.cagr) }}%
+                </span>
+              </div>
+              <div class="flex gap-1.5 ml-auto">
+                <span class="text-[9px] tabular-nums" style="color: #52525b;">Y:{{ item.scoring.breakdown.yield }}</span>
+                <span class="text-[9px] tabular-nums" style="color: #52525b;">C:{{ item.scoring.breakdown.cagr }}</span>
+                <span class="text-[9px] tabular-nums" style="color: #52525b;">S:{{ item.scoring.breakdown.consistency }}</span>
+                <span class="text-[9px] tabular-nums" style="color: #52525b;">M:{{ item.scoring.breakdown.margin }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Desktop layout: single row -->
+        <div class="hidden sm:flex items-center gap-4">
+          <!-- Position -->
+          <div
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
+            :style="{
+              background: item.scoring ? heatBg(item.scoring.heat) : 'rgba(255,255,255,0.04)',
+              color: item.scoring ? heatColor(item.scoring.heat) : '#71717a',
+              border: '1px solid ' + (item.scoring ? heatBorder(item.scoring.heat) : 'rgba(255,255,255,0.06)'),
+            }"
+          >
+            {{ idx + 1 }}
+          </div>
+
+          <!-- Logo + Info -->
+          <div class="flex items-center gap-3 min-w-0 flex-1">
+            <div
+              v-if="item.image"
+              class="w-9 h-9 rounded-lg overflow-hidden shrink-0 bg-white/5 p-0.5"
+            >
+              <img :src="item.image" :alt="item.ticker" class="w-full h-full object-contain rounded-md" />
+            </div>
+            <div v-else class="w-9 h-9 rounded-lg shrink-0 bg-primary/10 flex items-center justify-center">
+              <span class="text-primary text-[10px] font-bold">{{ item.ticker?.slice(0, 2) }}</span>
+            </div>
+
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-semibold text-foreground truncate">{{ item.name }}</span>
+                <span class="text-[10px] text-muted-foreground">{{ item.ticker }}</span>
+              </div>
+              <div class="flex items-center gap-3 mt-0.5">
+                <span
+                  class="text-[9px] uppercase tracking-wider px-1.5 py-0 rounded"
+                  :class="item.category === 'actives' ? 'text-primary bg-primary/10' : 'text-muted-foreground bg-white/5'"
+                >
+                  {{ item.category === 'actives' ? 'Activo' : 'Watchlist' }}
+                </span>
+                <span v-if="item.indicators" class="text-[10px]" style="color: #71717a;">
+                  {{ item.currency || '$' }}{{ fmt(item.indicators.currentPrice) }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Yield info -->
+          <div v-if="item.indicators" class="text-right shrink-0 w-20">
+            <div class="text-[10px] uppercase" style="color: #71717a;">Yield</div>
+            <div class="text-sm font-bold text-primary">{{ fmt(item.indicators.currentYield) }}%</div>
+          </div>
+
+          <!-- CAGR -->
+          <div v-if="item.projection" class="text-right shrink-0 w-20">
+            <div class="text-[10px] uppercase" style="color: #71717a;">CAGR</div>
+            <div
+              class="text-sm font-semibold"
+              :style="{ color: item.projection.cagr >= 0 ? '#34d399' : '#f87171' }"
+            >
+              {{ item.projection.cagr >= 0 ? '+' : '' }}{{ fmt(item.projection.cagr) }}%
+            </div>
+          </div>
+
+          <!-- Score bar + signal -->
+          <div v-if="item.scoring" class="shrink-0 w-44">
+            <div class="flex items-center justify-between mb-1">
+              <span
+                class="text-[10px] font-semibold uppercase tracking-wider"
+                :style="{ color: heatColor(item.scoring.heat) }"
+              >
+                {{ item.scoring.signal }}
+              </span>
+              <span class="text-xs font-bold text-foreground">{{ item.score }}</span>
+            </div>
+            <div class="h-1.5 rounded-full bg-white/5 overflow-hidden">
+              <div
+                class="h-full rounded-full transition-all duration-500"
+                :style="{
+                  width: scoreBarWidth(item.score),
+                  background: scoreBarGradient(item.scoring.heat),
+                }"
+              ></div>
+            </div>
+            <div class="flex gap-2 mt-1">
+              <span class="text-[8px]" style="color: #52525b;" title="Yield position">Y:{{ item.scoring.breakdown.yield }}</span>
+              <span class="text-[8px]" style="color: #52525b;" title="CAGR bonus">C:{{ item.scoring.breakdown.cagr }}</span>
+              <span class="text-[8px]" style="color: #52525b;" title="Consistency">S:{{ item.scoring.breakdown.consistency }}</span>
+              <span class="text-[8px]" style="color: #52525b;" title="Safety margin">M:{{ item.scoring.breakdown.margin }}</span>
+            </div>
+          </div>
+
+          <!-- No data state -->
+          <div v-else class="shrink-0 w-44 text-right">
+            <span class="text-[10px] text-muted-foreground/50">Sin análisis</span>
+            <p class="text-[9px] text-muted-foreground/30 mt-0.5">Analiza este activo primero</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.pop-fade-enter-active,
+.pop-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.pop-fade-enter-from,
+.pop-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+</style>
