@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Highcharts from 'highcharts'
 import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
 import { labelStyle, gridColor, titleStyle, earthyBrown, legendBottom, fmtNum, cagr, freshSubtitle } from '@/lib/chartConfig'
+import { useCurrency } from '@/composables/useCurrency'
 
 const props = defineProps({
   cashFlow: { type: Array, default: () => [] },
@@ -10,6 +11,9 @@ const props = defineProps({
   currency: { type: String, default: '$' },
   freshLabel: { type: String, default: '' },
 })
+
+const { convertByTicker } = useCurrency()
+const cv = (val) => convertByTicker(val, props.ticker)
 
 const chartContainer = ref(null)
 let chartInstance = null
@@ -20,8 +24,8 @@ const chartOptions = computed(() => {
   if (!hasData.value) return null
   const cf = props.cashFlow
   const categories = cf.map((d) => d.year)
-  const fcfData = cf.map((d) => d.freeCashFlow)
-  const divData = cf.map((d) => d.dividendsPaid)
+  const fcfData = cf.map((d) => cv(d.freeCashFlow))
+  const divData = cf.map((d) => cv(d.dividendsPaid))
   const payoutData = cf.map((d) => d.freeCashFlow > 0 ? parseFloat(((d.dividendsPaid / d.freeCashFlow) * 100).toFixed(2)) : 0)
   const fcfCagr = cagr(fcfData)
   const divCagr = cagr(divData)

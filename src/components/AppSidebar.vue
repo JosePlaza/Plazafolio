@@ -1,6 +1,8 @@
 <script setup>
 import { ref, watch } from 'vue'
-import { getCurrencySymbol } from '@/lib/currency'
+import { useCurrency } from '@/composables/useCurrency'
+
+const { symbolFor, convertByTicker } = useCurrency()
 
 const props = defineProps({
   actives: { type: Array, default: () => [] },
@@ -60,6 +62,7 @@ function onDragEnd(e) {
 
 function onDragOverItem(e, category, index) {
   e.preventDefault()
+  e.stopPropagation()
   e.dataTransfer.dropEffect = 'move'
   dragOverCategory.value = category
   const rect = e.currentTarget.getBoundingClientRect()
@@ -88,7 +91,40 @@ function onDragLeave(e, category) {
 function onDrop(e, targetCategory) {
   e.preventDefault()
   if (!dragItem.value) return
-  if (dragSource.value !== targetCategory) emit('move', dragItem.value.id, targetCategory)
+
+  const item = dragItem.value
+  const source = dragSource.value
+  const idx = dropIndex.value
+
+  let newActives = [...props.actives]
+  let newWatchlist = [...props.watchlist]
+
+  // Remove from source list
+  if (source === 'actives') {
+    newActives = newActives.filter(a => a.id !== item.id)
+  } else {
+    newWatchlist = newWatchlist.filter(a => a.id !== item.id)
+  }
+
+  // Update category on the item if moving between groups
+  const movedItem = source !== targetCategory
+    ? { ...item, category: targetCategory }
+    : item
+
+  // Insert at drop position in target list
+  const targetList = targetCategory === 'actives' ? newActives : newWatchlist
+  // Clamp index to valid range
+  const insertIdx = Math.max(0, Math.min(idx, targetList.length))
+  targetList.splice(insertIdx, 0, movedItem)
+
+  if (targetCategory === 'actives') {
+    newActives = targetList
+  } else {
+    newWatchlist = targetList
+  }
+
+  emit('reorder', newActives, newWatchlist)
+
   dragOverCategory.value = null
   dropIndex.value = -1
   dragItem.value = null
@@ -156,7 +192,7 @@ function onTouchEnd(e, assetId) {
 
 function fmt(value, ticker) {
   if (value == null || isNaN(value) || value === 0) return '-'
-  return getCurrencySymbol(ticker) + Number(value).toFixed(2)
+  return symbolFor(ticker) + convertByTicker(Number(value), ticker).toFixed(2)
 }
 
 function getIndicatorTop(list, idx) { return idx * 44 + 'px' }
@@ -208,7 +244,7 @@ function getIndicatorTop(list, idx) { return idx * 44 + 'px' }
         <div
           class="drop-zone min-h-[8px] relative overflow-hidden transition-all duration-200"
           :class="[
-            dragOverCategory === 'actives' && dragSource !== 'actives' ? 'drag-over' : '',
+            dragOverCategory === 'actives' && dragItem ? 'drag-over' : '',
             activesOpen ? 'max-h-[2000px] mt-1' : 'max-h-0'
           ]"
           @dragover="onDragOverZone($event, 'actives')"
@@ -216,7 +252,7 @@ function getIndicatorTop(list, idx) { return idx * 44 + 'px' }
           @drop="onDrop($event, 'actives')"
         >
           <div
-            v-if="dragOverCategory === 'actives' && dropIndex >= 0 && dragItem && dragSource !== 'actives'"
+            v-if="dragOverCategory === 'actives' && dropIndex >= 0 && dragItem"
             class="drop-indicator" :style="{ top: getIndicatorTop(actives, dropIndex) }"
           />
 
@@ -298,7 +334,7 @@ function getIndicatorTop(list, idx) { return idx * 44 + 'px' }
         <div
           class="drop-zone min-h-[8px] relative overflow-hidden transition-all duration-200"
           :class="[
-            dragOverCategory === 'watchlist' && dragSource !== 'watchlist' ? 'drag-over' : '',
+            dragOverCategory === 'watchlist' && dragItem ? 'drag-over' : '',
             watchlistOpen ? 'max-h-[2000px] mt-1' : 'max-h-0'
           ]"
           @dragover="onDragOverZone($event, 'watchlist')"
@@ -306,7 +342,7 @@ function getIndicatorTop(list, idx) { return idx * 44 + 'px' }
           @drop="onDrop($event, 'watchlist')"
         >
           <div
-            v-if="dragOverCategory === 'watchlist' && dropIndex >= 0 && dragItem && dragSource !== 'watchlist'"
+            v-if="dragOverCategory === 'watchlist' && dropIndex >= 0 && dragItem"
             class="drop-indicator" :style="{ top: getIndicatorTop(watchlist, dropIndex) }"
           />
 

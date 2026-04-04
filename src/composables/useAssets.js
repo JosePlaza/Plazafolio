@@ -80,6 +80,18 @@ export function useAssets() {
     } catch { /* silent */ }
   }
 
+  async function updateAssetPosition(assetId, shares, entryPrice) {
+    const asset =
+      actives.value.find((a) => a.id === assetId) ||
+      watchlist.value.find((a) => a.id === assetId)
+    if (!asset) return
+    if (shares !== undefined) asset.shares = shares
+    if (entryPrice !== undefined) asset.entryPrice = entryPrice
+    try {
+      await apiUpdateAsset(assetId, { shares, entryPrice, category: asset.category })
+    } catch { /* silent */ }
+  }
+
   const allAssets = computed(() => [...actives.value, ...watchlist.value])
 
   return {
@@ -93,5 +105,6 @@ export function useAssets() {
     removeAsset,
     reorder,
     updatePrice,
+    updateAssetPosition,
   }
 }

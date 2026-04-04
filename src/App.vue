@@ -25,10 +25,13 @@ import EvEbitdaChart from '@/components/charts/EvEbitdaChart.vue'
 import DebtChart from '@/components/charts/DebtChart.vue'
 import SharesChart from '@/components/charts/SharesChart.vue'
 import RankingView from '@/components/RankingView.vue'
+import PortfolioView from '@/components/PortfolioView.vue'
+import PortfolioDetail from '@/components/PortfolioDetail.vue'
+import { getAllCachedAnalyses } from '@/services/assetsApi'
 
 const { user, loading: authLoading, init: initAuth, signOut } = useAuth()
 const { loading, refreshing, error, ticker, data, hasData, currency, generate } = useGeraldine()
-const { actives, watchlist, load: loadAssets, addAsset, moveAsset, removeAsset } = useAssets()
+const { actives, watchlist, load: loadAssets, addAsset, moveAsset, removeAsset, reorder, updateAssetPosition } = useAssets()
 
 const activeTab = ref('analysis')
 const sidebarOpen = ref(false)
@@ -37,6 +40,35 @@ const selectedAssetId = ref(null)
 const companyName = ref('')
 const companyLogo = ref(null)
 const years = ref(12)
+
+// ── Portfolio detail drill-down ──
+const portfolioDetailAsset = ref(null)
+const portfolioAnalyses = ref({})
+
+async function onPortfolioSelect(item) {
+  // Load analysis data for this asset
+  if (!portfolioAnalyses.value[item.ticker]) {
+    const all = await getAllCachedAnalyses()
+    portfolioAnalyses.value = all || {}
+  }
+  portfolioDetailAsset.value = item
+}
+
+function onPortfolioBack() {
+  portfolioDetailAsset.value = null
+}
+
+async function onPortfolioSave({ id, shares, entryPrice }) {
+  await updateAssetPosition(id, shares, entryPrice)
+  // Update the detail asset ref to reflect changes
+  if (portfolioDetailAsset.value?.id === id) {
+    portfolioDetailAsset.value = {
+      ...portfolioDetailAsset.value,
+      shares,
+      entryPrice,
+    }
+  }
+}
 
 const periodOptions = [
   { label: '8y', value: 8 },
@@ -123,6 +155,10 @@ function onMoveAsset(assetId, toCategory) {
   moveAsset(assetId, toCategory)
 }
 
+function onReorderAssets(newActives, newWatchlist) {
+  reorder(newActives, newWatchlist)
+}
+
 function onRemoveAsset(assetId) {
   removeAsset(assetId)
   if (selectedAssetId.value === assetId) selectedAssetId.value = null
@@ -153,7 +189,7 @@ function onRankingSelect(asset) {
     </div>
 
     <!-- Header -->
-    <AppHeader :active-tab="activeTab" :sidebar-open="sidebarOpen" @update:active-tab="activeTab = $event" @toggle-sidebar="sidebarOpen = !sidebarOpen" @sign-out="signOut" />
+    <AppHeader :active-tab="activeTab" :sidebar-open="sidebarOpen" @update:active-tab="portfolioDetailAsset = null; activeTab = $event" @toggle-sidebar="sidebarOpen = !sidebarOpen" @sign-out="signOut" />
 
     <!-- ═══ Views with fade transition ═══ -->
     <Transition name="view-fade" mode="out-in">
@@ -230,7 +266,7 @@ function onRankingSelect(asset) {
           <!-- Row 1: KPIs (glass card) + Tesis chart -->
           <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
             <div class="lg:col-span-4 glass-card p-4">
-              <IndicatorsPanel :indicators="data.indicators" :projection="data.projection" :dividends="data.dividends" :currency="currency" :fresh-label="freshLabels.price" />
+              <IndicatorsPanel :indicators="data.indicators" :projection="data.projection" :dividends="data.dividends" :currency="currency" :ticker="ticker" :fresh-label="freshLabels.price" />
             </div>
             <div class="lg:col-span-8 glass-card p-4">
               <GeraldineChart :price-bands="data.priceBands" :ticker="ticker" :currency="currency" :fresh-label="freshLabels.price" />
@@ -277,7 +313,7 @@ function onRankingSelect(asset) {
           <!-- Row 5: Ingresos + Márgenes -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="glass-card p-4">
-              <RevenueChart :fundamentals="data.fundamentals" :currency="currency" :fresh-label="freshLabels.fundamentals" />
+              <RevenueChart :fundamentals="data.fundamentals" :ticker="ticker" :currency="currency" :fresh-label="freshLabels.fundamentals" />
             </div>
             <div class="glass-card p-4">
               <MarginsChart :fundamentals="data.fundamentals" :fresh-label="freshLabels.fundamentals" />
@@ -287,17 +323,17 @@ function onRankingSelect(asset) {
           <!-- Row 6: EV/FCF + EV/EBITDA -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="glass-card p-4">
-              <EvFcfChart :fundamentals="data.fundamentals" :currency="currency" :fresh-label="freshLabels.fundamentals" />
+              <EvFcfChart :fundamentals="data.fundamentals" :ticker="ticker" :currency="currency" :fresh-label="freshLabels.fundamentals" />
             </div>
             <div class="glass-card p-4">
-              <EvEbitdaChart :fundamentals="data.fundamentals" :currency="currency" :fresh-label="freshLabels.fundamentals" />
+              <EvEbitdaChart :fundamentals="data.fundamentals" :ticker="ticker" :currency="currency" :fresh-label="freshLabels.fundamentals" />
             </div>
           </div>
 
           <!-- Row 7: Deuda + Acciones -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="glass-card p-4">
-              <DebtChart :fundamentals="data.fundamentals" :currency="currency" :fresh-label="freshLabels.fundamentals" />
+              <DebtChart :fundamentals="data.fundamentals" :ticker="ticker" :currency="currency" :fresh-label="freshLabels.fundamentals" />
             </div>
             <div class="glass-card p-4">
               <SharesChart :fundamentals="data.fundamentals" :fresh-label="freshLabels.fundamentals" />
@@ -315,6 +351,7 @@ function onRankingSelect(asset) {
         @select="onSelectAsset"
         @add="showAddModal = true"
         @move="onMoveAsset"
+        @reorder="onReorderAssets"
         @remove="onRemoveAsset"
         @close="sidebarOpen = false"
       />
@@ -328,6 +365,31 @@ function onRankingSelect(asset) {
           :watchlist="watchlist"
           :visible="activeTab === 'ranking'"
           @select-asset="onRankingSelect"
+        />
+      </main>
+    </div>
+
+    <!-- ═══ Portfolio view ═══ -->
+    <div v-else-if="activeTab === 'portfolio'" key="portfolio" class="flex flex-1 relative z-10" style="padding-top: calc(3.5rem + env(safe-area-inset-top, 0px));">
+      <main class="dot-pattern flex-1 overflow-y-auto p-3 sm:p-6" style="max-height: calc(100dvh - 3.5rem - env(safe-area-inset-top, 0px))">
+        <!-- Detail drill-down -->
+        <PortfolioDetail
+          v-if="portfolioDetailAsset"
+          :asset="portfolioDetailAsset"
+          :indicators="portfolioAnalyses[portfolioDetailAsset.ticker]?.data?.indicators"
+          :projection="portfolioAnalyses[portfolioDetailAsset.ticker]?.data?.projection"
+          :dividends="portfolioAnalyses[portfolioDetailAsset.ticker]?.data?.dividends || []"
+          :scoring="portfolioDetailAsset.scoring"
+          @back="onPortfolioBack"
+          @save="onPortfolioSave"
+        />
+        <!-- Portfolio list -->
+        <PortfolioView
+          v-else
+          :actives="actives"
+          :watchlist="watchlist"
+          :visible="activeTab === 'portfolio'"
+          @select-asset="onPortfolioSelect"
         />
       </main>
     </div>

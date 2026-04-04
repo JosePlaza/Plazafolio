@@ -40,7 +40,7 @@ const formatted = computed(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #52525b;
+  color: #a1a1aa;
   font-size: 9px;
   font-weight: 500;
   letter-spacing: 0.01em;

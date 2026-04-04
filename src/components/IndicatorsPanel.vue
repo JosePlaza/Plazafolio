@@ -1,14 +1,31 @@
 <script setup>
 import { computed } from 'vue'
 import { computeBuyScore } from '@/lib/scoring'
+import { useCurrency } from '@/composables/useCurrency'
+import AnimatedNumber from '@/components/AnimatedNumber.vue'
 
 const props = defineProps({
   indicators: { type: Object, default: null },
   projection: { type: Object, default: null },
   dividends: { type: Array, default: () => [] },
   currency: { type: String, default: '$' },
+  ticker: { type: String, default: '' },
   freshLabel: { type: String, default: '' },
 })
+
+const { convertByTicker, symbolFor } = useCurrency()
+
+// Convert current price: properly reactive computed property
+const convertedPrice = computed(() => convertByTicker(props.indicators?.currentPrice || 0, props.ticker))
+
+// Convert undervalued price: properly reactive computed property
+const convertedUndervaluedPrice = computed(() => convertByTicker(props.indicators?.undervaluedPrice || 0, props.ticker))
+
+// Convert overvalued price: properly reactive computed property
+const convertedOvervaluedPrice = computed(() => convertByTicker(props.indicators?.overvaluedPrice || 0, props.ticker))
+
+// Symbol is reactive to currency changes
+const sym = computed(() => symbolFor(props.ticker))
 
 function fmt(value, decimals = 2) {
   if (value == null || isNaN(value)) return '-'
@@ -143,7 +160,7 @@ const recommendation = computed(() => {
     <div class="grid grid-cols-2 gap-x-6 gap-y-3">
       <div>
         <div class="text-[10px] uppercase tracking-wider mb-0.5" style="color: #71717a;">Yield Actual</div>
-        <div class="text-lg font-bold text-primary leading-tight">{{ fmt(indicators.currentYield) }}%</div>
+        <div class="text-lg font-bold text-primary leading-tight"><AnimatedNumber :value="indicators.currentYield" suffix="%" /></div>
         <div class="text-[10px] mt-0.5" :class="yieldZone(indicators).color">
           {{ yieldZone(indicators).label }}
         </div>
@@ -151,23 +168,23 @@ const recommendation = computed(() => {
 
       <div>
         <div class="text-[10px] uppercase tracking-wider mb-0.5" style="color: #71717a;">Yield Medio</div>
-        <div class="text-lg font-bold text-foreground leading-tight">{{ fmt(indicators.avgYield) }}%</div>
+        <div class="text-lg font-bold text-foreground leading-tight"><AnimatedNumber :value="indicators.avgYield" suffix="%" /></div>
         <div class="text-[10px] mt-0.5" style="color: #71717a;">Histórico</div>
       </div>
 
       <div>
         <div class="text-[10px] uppercase tracking-wider mb-0.5" style="color: #71717a;">Cotización</div>
-        <div class="text-lg font-bold text-foreground leading-tight">{{ currency }}{{ fmt(indicators.currentPrice) }}</div>
+        <div class="text-lg font-bold text-foreground leading-tight"><AnimatedNumber :value="convertedPrice" :prefix="sym" /></div>
       </div>
 
       <div>
         <div class="text-[10px] uppercase tracking-wider mb-0.5" style="color: #71717a;">Infravalorado</div>
-        <div class="text-lg font-bold text-success leading-tight">{{ currency }}{{ fmt(indicators.undervaluedPrice) }}</div>
+        <div class="text-lg font-bold text-success leading-tight"><AnimatedNumber :value="convertedUndervaluedPrice" :prefix="sym" /></div>
       </div>
 
       <div class="col-span-2">
         <div class="text-[10px] uppercase tracking-wider mb-0.5" style="color: #71717a;">Sobrevalorado</div>
-        <div class="text-lg font-bold text-destructive leading-tight">{{ currency }}{{ fmt(indicators.overvaluedPrice) }}</div>
+        <div class="text-lg font-bold text-destructive leading-tight"><AnimatedNumber :value="convertedOvervaluedPrice" :prefix="sym" /></div>
       </div>
     </div>
 

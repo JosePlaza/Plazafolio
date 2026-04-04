@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Highcharts from 'highcharts'
 import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
 import { legendBottom, freshSubtitle } from '@/lib/chartConfig'
+import { useCurrency } from '@/composables/useCurrency'
 
 const props = defineProps({
   dividends: { type: Array, default: () => [] },
@@ -11,6 +12,10 @@ const props = defineProps({
   currency: { type: String, default: '$' },
   freshLabel: { type: String, default: '' },
 })
+
+const { convertByTicker, symbolFor } = useCurrency()
+const cv = (val) => convertByTicker(val, props.ticker)
+const sym = computed(() => symbolFor(props.ticker))
 
 const chartContainer = ref(null)
 let chartInstance = null
@@ -26,7 +31,7 @@ const yearlyDividends = computed(() => {
   const byYear = {}
   props.dividends.forEach((d) => {
     const year = String(d.date).substring(0, 4)
-    const amount = d.adjDividend || d.dividend || 0
+    const amount = cv(d.adjDividend || d.dividend || 0)
     byYear[year] = (byYear[year] || 0) + amount
   })
 
@@ -61,7 +66,7 @@ const chartOptions = computed(() => {
 
   const categories = yd.map((d) => d.year)
   const amounts = yd.map((d) => d.amount)
-  const c = props.currency
+  const c = sym.value
   const cagrVal = cagr.value
 
   // Generate CAGR trend line data

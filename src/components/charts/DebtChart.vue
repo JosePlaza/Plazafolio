@@ -3,12 +3,17 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Highcharts from 'highcharts'
 import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
 import { labelStyle, gridColor, titleStyle, earthyBrown, legendBottom, fmtNum, yearFromDate, buildTooltip, freshSubtitle } from '@/lib/chartConfig'
+import { useCurrency } from '@/composables/useCurrency'
 
 const props = defineProps({
   fundamentals: { type: Object, default: null },
+  ticker: { type: String, default: '' },
   currency: { type: String, default: '$' },
   freshLabel: { type: String, default: '' },
 })
+
+const { convertByTicker } = useCurrency()
+const cv = (val) => convertByTicker(val, props.ticker)
 
 const chartContainer = ref(null)
 let chartInstance = null
@@ -24,8 +29,8 @@ const chartOptions = computed(() => {
   const cfMap = Object.fromEntries(cf.map((d) => [yearFromDate(d.date), d]))
 
   const categories = bal.map((d) => yearFromDate(d.date))
-  const fcfData = bal.map((d) => cfMap[yearFromDate(d.date)]?.freeCashFlow ?? 0)
-  const netDebtData = bal.map((d) => d.netDebt ?? 0)
+  const fcfData = bal.map((d) => cv(cfMap[yearFromDate(d.date)]?.freeCashFlow ?? 0))
+  const netDebtData = bal.map((d) => cv(d.netDebt ?? 0))
   const ratioData = bal.map((d, i) => {
     const nd = netDebtData[i]; const fcf = fcfData[i]
     if (!fcf || fcf <= 0 || !nd) return null

@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch, onBeforeUnmount } from 'vue'
 import { getAllCachedAnalyses } from '@/services/assetsApi'
 import { computeBuyScore } from '@/lib/scoring'
-import { getCurrencySymbol } from '@/lib/currency'
+import { useCurrency } from '@/composables/useCurrency'
 
 const props = defineProps({
   actives: { type: Array, default: () => [] },
@@ -12,6 +12,7 @@ const props = defineProps({
 
 const emit = defineEmits(['select-asset'])
 
+const { symbolFor, convertByTicker } = useCurrency()
 const analyses = ref({})
 const loadingRanking = ref(false)
 const showScoringInfo = ref(false)
@@ -43,7 +44,7 @@ const rankedAssets = computed(() => {
         scoring,
         indicators,
         projection,
-        currency: getCurrencySymbol(asset.ticker),
+        currency: symbolFor(asset.ticker),
         category: asset.category || (props.actives.find(a => a.id === asset.id) ? 'actives' : 'watchlist'),
       }
     })
@@ -147,7 +148,7 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
                     <span class="text-[10px] font-semibold text-zinc-300">Y · Posición del Yield</span>
                     <span class="text-[9px] text-primary font-bold">0 – 70 pts</span>
                   </div>
-                  <p class="text-[10px] text-zinc-500 leading-relaxed">
+                  <p class="text-[10px] text-zinc-400 leading-relaxed">
                     Mide dónde está el yield actual dentro del rango histórico. Yield cerca o por encima del promedio alto = zona de compra (50-70 pts). Cerca del bajo = zona cara (0-15 pts).
                   </p>
                 </div>
@@ -158,7 +159,7 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
                     <span class="text-[10px] font-semibold text-zinc-300">C · Crecimiento CAGR</span>
                     <span class="text-[9px] text-primary font-bold">0 – 15 pts</span>
                   </div>
-                  <p class="text-[10px] text-zinc-500 leading-relaxed">
+                  <p class="text-[10px] text-zinc-400 leading-relaxed">
                     Premia el crecimiento sostenido del dividendo. CAGR 5% ≈ 7.5 pts, 10% ≈ 12.5 pts, 15%+ = 15 pts. CAGR negativo penaliza hasta -5 pts.
                   </p>
                 </div>
@@ -169,7 +170,7 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
                     <span class="text-[10px] font-semibold text-zinc-300">S · Consistencia</span>
                     <span class="text-[9px] text-primary font-bold">0 – 10 pts</span>
                   </div>
-                  <p class="text-[10px] text-zinc-500 leading-relaxed">
+                  <p class="text-[10px] text-zinc-400 leading-relaxed">
                     Años consecutivos pagando dividendo. 5 años = 5 pts, 10+ años = 10 pts. Más años = empresa más fiable.
                   </p>
                 </div>
@@ -180,7 +181,7 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
                     <span class="text-[10px] font-semibold text-zinc-300">M · Margen de seguridad</span>
                     <span class="text-[9px] text-primary font-bold">0 – 5 pts</span>
                   </div>
-                  <p class="text-[10px] text-zinc-500 leading-relaxed">
+                  <p class="text-[10px] text-zinc-400 leading-relaxed">
                     Potencial alcista hasta el precio de infravaloración. 30%+ de upside = 5 pts máximo.
                   </p>
                 </div>
@@ -192,32 +193,32 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
                     <div class="flex items-center gap-1.5">
                       <span class="w-2 h-2 rounded-full" style="background: #34d399;"></span>
                       <span class="text-[10px] text-zinc-400">Compra fuerte</span>
-                      <span class="text-[9px] text-zinc-600 ml-auto">≥ 75</span>
+                      <span class="text-[9px] text-zinc-400 ml-auto">≥ 75</span>
                     </div>
                     <div class="flex items-center gap-1.5">
                       <span class="w-2 h-2 rounded-full" style="background: #6ee7b7;"></span>
                       <span class="text-[10px] text-zinc-400">Compra</span>
-                      <span class="text-[9px] text-zinc-600 ml-auto">60-74</span>
+                      <span class="text-[9px] text-zinc-400 ml-auto">60-74</span>
                     </div>
                     <div class="flex items-center gap-1.5">
                       <span class="w-2 h-2 rounded-full" style="background: #fbbf24;"></span>
                       <span class="text-[10px] text-zinc-400">Vigilar</span>
-                      <span class="text-[9px] text-zinc-600 ml-auto">45-59</span>
+                      <span class="text-[9px] text-zinc-400 ml-auto">45-59</span>
                     </div>
                     <div class="flex items-center gap-1.5">
                       <span class="w-2 h-2 rounded-full" style="background: #fb923c;"></span>
                       <span class="text-[10px] text-zinc-400">Mantener</span>
-                      <span class="text-[9px] text-zinc-600 ml-auto">30-44</span>
+                      <span class="text-[9px] text-zinc-400 ml-auto">30-44</span>
                     </div>
                     <div class="flex items-center gap-1.5">
                       <span class="w-2 h-2 rounded-full" style="background: #f87171;"></span>
                       <span class="text-[10px] text-zinc-400">Caro</span>
-                      <span class="text-[9px] text-zinc-600 ml-auto">15-29</span>
+                      <span class="text-[9px] text-zinc-400 ml-auto">15-29</span>
                     </div>
                     <div class="flex items-center gap-1.5">
                       <span class="w-2 h-2 rounded-full" style="background: #ef4444;"></span>
                       <span class="text-[10px] text-zinc-400">Vender</span>
-                      <span class="text-[9px] text-zinc-600 ml-auto">&lt; 15</span>
+                      <span class="text-[9px] text-zinc-400 ml-auto">&lt; 15</span>
                     </div>
                   </div>
                 </div>
@@ -332,7 +333,7 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
               </div>
 
               <div v-if="item.indicators" class="text-right shrink-0">
-                <div class="text-sm font-medium text-foreground tabular-nums">{{ item.currency || '$' }}{{ fmt(item.indicators.currentPrice) }}</div>
+                <div class="text-sm font-medium text-foreground tabular-nums">{{ item.currency || '$' }}{{ fmt(convertByTicker(item.indicators.currentPrice, item.ticker)) }}</div>
               </div>
             </div>
 
@@ -377,10 +378,10 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
                 </span>
               </div>
               <div class="flex gap-1.5 ml-auto">
-                <span class="text-[9px] tabular-nums" style="color: #52525b;">Y:{{ item.scoring.breakdown.yield }}</span>
-                <span class="text-[9px] tabular-nums" style="color: #52525b;">C:{{ item.scoring.breakdown.cagr }}</span>
-                <span class="text-[9px] tabular-nums" style="color: #52525b;">S:{{ item.scoring.breakdown.consistency }}</span>
-                <span class="text-[9px] tabular-nums" style="color: #52525b;">M:{{ item.scoring.breakdown.margin }}</span>
+                <span class="text-[9px] tabular-nums" style="color: #a1a1aa;">Y:{{ item.scoring.breakdown.yield }}</span>
+                <span class="text-[9px] tabular-nums" style="color: #a1a1aa;">C:{{ item.scoring.breakdown.cagr }}</span>
+                <span class="text-[9px] tabular-nums" style="color: #a1a1aa;">S:{{ item.scoring.breakdown.consistency }}</span>
+                <span class="text-[9px] tabular-nums" style="color: #a1a1aa;">M:{{ item.scoring.breakdown.margin }}</span>
               </div>
             </div>
           </div>
@@ -425,7 +426,7 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
                   {{ item.category === 'actives' ? 'Activo' : 'Watchlist' }}
                 </span>
                 <span v-if="item.indicators" class="text-[10px]" style="color: #71717a;">
-                  {{ item.currency || '$' }}{{ fmt(item.indicators.currentPrice) }}
+                  {{ item.currency || '$' }}{{ fmt(convertByTicker(item.indicators.currentPrice, item.ticker)) }}
                 </span>
               </div>
             </div>
@@ -469,10 +470,10 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
               ></div>
             </div>
             <div class="flex gap-2 mt-1">
-              <span class="text-[8px]" style="color: #52525b;" title="Yield position">Y:{{ item.scoring.breakdown.yield }}</span>
-              <span class="text-[8px]" style="color: #52525b;" title="CAGR bonus">C:{{ item.scoring.breakdown.cagr }}</span>
-              <span class="text-[8px]" style="color: #52525b;" title="Consistency">S:{{ item.scoring.breakdown.consistency }}</span>
-              <span class="text-[8px]" style="color: #52525b;" title="Safety margin">M:{{ item.scoring.breakdown.margin }}</span>
+              <span class="text-[8px]" style="color: #a1a1aa;" title="Yield position">Y:{{ item.scoring.breakdown.yield }}</span>
+              <span class="text-[8px]" style="color: #a1a1aa;" title="CAGR bonus">C:{{ item.scoring.breakdown.cagr }}</span>
+              <span class="text-[8px]" style="color: #a1a1aa;" title="Consistency">S:{{ item.scoring.breakdown.consistency }}</span>
+              <span class="text-[8px]" style="color: #a1a1aa;" title="Safety margin">M:{{ item.scoring.breakdown.margin }}</span>
             </div>
           </div>
 

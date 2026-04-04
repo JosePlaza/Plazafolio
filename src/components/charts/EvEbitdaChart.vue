@@ -3,12 +3,17 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Highcharts from 'highcharts'
 import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
 import { labelStyle, gridColor, titleStyle, earthyBrown, legendBottom, fmtNum, yearFromDate, buildTooltip, freshSubtitle } from '@/lib/chartConfig'
+import { useCurrency } from '@/composables/useCurrency'
 
 const props = defineProps({
   fundamentals: { type: Object, default: null },
+  ticker: { type: String, default: '' },
   currency: { type: String, default: '$' },
   freshLabel: { type: String, default: '' },
 })
+
+const { convertByTicker } = useCurrency()
+const cv = (val) => convertByTicker(val, props.ticker)
 
 const chartContainer = ref(null)
 let chartInstance = null
@@ -22,7 +27,7 @@ const chartOptions = computed(() => {
   const inc = props.fundamentals.income
   const ev = props.fundamentals.enterpriseValue
   const categories = inc.map((d) => yearFromDate(d.date))
-  const ebitdaData = inc.map((d) => d.ebitda ?? 0)
+  const ebitdaData = inc.map((d) => cv(d.ebitda ?? 0))
   const ratioData = inc.map((d) => (!ev || !d.ebitda || d.ebitda <= 0) ? null : parseFloat((ev / d.ebitda).toFixed(2)))
 
   return {

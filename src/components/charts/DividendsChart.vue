@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Highcharts from 'highcharts'
 import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
 import { legendBottom, freshSubtitle } from '@/lib/chartConfig'
+import { useCurrency } from '@/composables/useCurrency'
 
 const props = defineProps({
   dividends: { type: Array, default: () => [] },
@@ -10,6 +11,10 @@ const props = defineProps({
   currency: { type: String, default: '$' },
   freshLabel: { type: String, default: '' },
 })
+
+const { convertByTicker, symbolFor } = useCurrency()
+const cv = (val) => convertByTicker(val, props.ticker)
+const sym = computed(() => symbolFor(props.ticker))
 
 const chartContainer = ref(null)
 let chartInstance = null
@@ -49,8 +54,8 @@ const chartOptions = computed(() => {
   if (!filtered.length) return null
 
   const categories = filtered.map((d) => d.date)
-  const amounts = filtered.map((d) => d.adjDividend || d.dividend || 0)
-  const c = props.currency
+  const amounts = filtered.map((d) => cv(d.adjDividend || d.dividend || 0))
+  const c = sym.value
 
   // Year tick positions
   const yearTicks = []

@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Highcharts from 'highcharts'
 import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
 import { legendBottom, freshSubtitle } from '@/lib/chartConfig'
+import { useCurrency } from '@/composables/useCurrency'
 
 const props = defineProps({
   priceBands: { type: Array, default: () => [] },
@@ -10,6 +11,10 @@ const props = defineProps({
   currency: { type: String, default: '$' },
   freshLabel: { type: String, default: '' },
 })
+
+const { convertByTicker, symbolFor } = useCurrency()
+const cv = (val) => convertByTicker(val, props.ticker)
+const sym = computed(() => symbolFor(props.ticker))
 
 const chartContainer = ref(null)
 let chartInstance = null
@@ -23,9 +28,9 @@ const chartOptions = computed(() => {
   if (!props.priceBands.length) return null
 
   const categories = props.priceBands.map((d) => d.date)
-  const closePrices = props.priceBands.map((d) => d.close)
-  const undervalued = props.priceBands.map((d) => d.undervalued)
-  const overvalued = props.priceBands.map((d) => d.overvalued)
+  const closePrices = props.priceBands.map((d) => cv(d.close))
+  const undervalued = props.priceBands.map((d) => cv(d.undervalued))
+  const overvalued = props.priceBands.map((d) => cv(d.overvalued))
 
   // Find max value for the red threshold (needs to be above all data)
   const maxVal = Math.max(
@@ -95,7 +100,7 @@ const chartOptions = computed(() => {
       labels: {
         style: labelStyle,
         formatter() {
-          return props.currency + this.value
+          return sym.value + this.value
         },
       },
       gridLineColor: gridColor,
@@ -131,7 +136,7 @@ const chartOptions = computed(() => {
         html += `<div style="color: #a1a1aa; font-size: 10px; margin-bottom: 8px; letter-spacing: 0.03em;">${date}</div>`
         this.points.forEach((p) => {
           if (p.series.userOptions.isZone) return
-          const val = p.y != null ? props.currency + p.y.toFixed(2) : '-'
+          const val = p.y != null ? sym.value + p.y.toFixed(2) : '-'
           html += `<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px;">
             <span style="width: 6px; height: 6px; border-radius: 50%; background: ${p.series.color}; flex-shrink: 0;"></span>
             <span style="color: #a1a1aa; font-size: 11px; flex: 1;">${p.series.name}</span>

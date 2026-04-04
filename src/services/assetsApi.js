@@ -55,6 +55,8 @@ function mapAsset(row) {
     category: row.category,
     price: Number(row.price) || 0,
     image: row.image,
+    shares: Number(row.shares) || 0,
+    entryPrice: Number(row.entry_price ?? row.entryPrice) || 0,
   }
 }
 
@@ -85,6 +87,8 @@ export async function addAsset(asset) {
         price: asset.price || 0,
         image: asset.image || null,
         sort_order: asset.category === 'actives' ? db.actives.length : db.watchlist.length,
+        shares: 0,
+        entry_price: 0,
       })
       .select()
       .single()
@@ -103,6 +107,7 @@ export async function addAsset(asset) {
     const newAsset = {
       id, ticker: tickerUp, name: asset.name || tickerUp,
       category: asset.category, price: asset.price || 0, image: asset.image || null,
+      shares: 0, entryPrice: 0,
     }
     if (asset.category === 'actives') db.actives.push(newAsset)
     else db.watchlist.push(newAsset)
@@ -130,6 +135,8 @@ export async function updateAsset(id, updates) {
   if (updates.name !== undefined) asset.name = updates.name
   if (updates.image !== undefined) asset.image = updates.image
   if (updates.category) asset.category = updates.category
+  if (updates.shares !== undefined) asset.shares = updates.shares
+  if (updates.entryPrice !== undefined) asset.entryPrice = updates.entryPrice
 
   const targetCat = updates.category || asset.category
   if (targetCat === 'actives') db.actives.push(asset)
@@ -143,6 +150,8 @@ export async function updateAsset(id, updates) {
     if (updates.name !== undefined) updateData.name = updates.name
     if (updates.image !== undefined) updateData.image = updates.image
     if (updates.category) updateData.category = updates.category
+    if (updates.shares !== undefined) updateData.shares = updates.shares
+    if (updates.entryPrice !== undefined) updateData.entry_price = updates.entryPrice
 
     await supabase.from('assets').update(updateData).eq('id', id)
   } catch { /* offline */ }

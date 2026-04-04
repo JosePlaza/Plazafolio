@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useCurrency } from '@/composables/useCurrency'
 
 defineProps({
   activeTab: { type: String, default: 'analysis' },
@@ -8,10 +9,18 @@ defineProps({
 
 const emit = defineEmits(['update:activeTab', 'toggle-sidebar', 'sign-out'])
 
+const { forcedCurrency, setForcedCurrency } = useCurrency()
+
 const tabs = [
   { id: 'analysis', label: 'Análisis' },
   { id: 'ranking', label: 'Ranking' },
+  { id: 'portfolio', label: 'Portfolio' },
 ]
+
+function onCurrencyToggle() {
+  if (forcedCurrency.value === 'EUR') setForcedCurrency('USD')
+  else setForcedCurrency('EUR')
+}
 
 // ── User dropdown ──
 const showUserMenu = ref(false)
@@ -88,6 +97,43 @@ function handleSignOut() {
           class="absolute right-0 top-full mt-2 z-50 w-44 rounded-xl overflow-hidden"
           style="background: rgba(14, 14, 22, 0.95); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 12px 40px rgba(0,0,0,0.5);"
         >
+          <!-- Currency toggle -->
+          <div class="flex items-center justify-between px-4 py-2.5">
+            <div class="flex items-center gap-2.5">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-300">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+              </svg>
+              <span class="text-sm text-zinc-300">Divisa</span>
+            </div>
+            <button
+              class="relative flex items-center w-[72px] h-8 rounded-full transition-colors"
+              style="background: rgba(255,255,255,0.06);"
+              @click.stop="onCurrencyToggle"
+            >
+              <!-- USD label -->
+              <span
+                class="relative z-10 flex-1 text-center text-[11px] font-bold transition-colors"
+                :style="{ color: forcedCurrency !== 'EUR' ? '#e4e4e7' : '#52525b' }"
+              >USD</span>
+              <!-- EUR label -->
+              <span
+                class="relative z-10 flex-1 text-center text-[11px] font-bold transition-colors"
+                :style="{ color: forcedCurrency === 'EUR' ? '#e4e4e7' : '#52525b' }"
+              >EUR</span>
+              <!-- Sliding pill -->
+              <span
+                class="absolute top-1 h-6 w-[34px] rounded-full transition-all duration-200"
+                style="background: rgba(65,91,255,0.4);"
+                :style="{ left: forcedCurrency === 'EUR' ? '35px' : '3px' }"
+              ></span>
+            </button>
+          </div>
+
+          <div style="border-top: 1px solid rgba(255,255,255,0.06);"></div>
+
+          <!-- Sign out -->
           <button
             class="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-zinc-300 hover:bg-white/5 transition-colors"
             @click="handleSignOut"

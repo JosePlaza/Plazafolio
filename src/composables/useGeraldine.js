@@ -2,7 +2,7 @@ import { ref, reactive, computed } from 'vue'
 import { getHistoricalPrices, getDividendHistory, getCompanyProfile, getCashFlowData, getFundamentalsData } from '@/services/fmpApi'
 import { getCachedAnalysis, saveCachedAnalysis } from '@/services/assetsApi'
 import { computeAll } from '@/lib/geraldine'
-import { getCurrencySymbol } from '@/lib/currency'
+import { useCurrency } from '@/composables/useCurrency'
 
 /**
  * Composable principal que orquesta la obtención de datos y el cálculo
@@ -30,7 +30,8 @@ export function useGeraldine() {
   })
 
   const hasData = computed(() => data.priceBands.length > 0)
-  const currency = computed(() => getCurrencySymbol(ticker.value))
+  const { symbolFor } = useCurrency()
+  const currency = computed(() => symbolFor(ticker.value))
 
   /**
    * Aplica datos (desde cache o desde cálculo fresco) al estado reactivo

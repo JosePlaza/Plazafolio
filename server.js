@@ -16,6 +16,7 @@ app.use(express.json({ limit: '50mb' }))
 // ─── JSON file persistence for assets ────────────────────────────────────────
 const DB_PATH = new URL('./data/assets.json', import.meta.url).pathname
 const ANALYSIS_PATH = new URL('./data/analysis.json', import.meta.url).pathname
+const TX_PATH = new URL('./data/transactions.json', import.meta.url).pathname
 
 function readDB() {
   if (!existsSync(DB_PATH)) return { actives: [], watchlist: [] }
@@ -46,7 +47,7 @@ app.get('/api/db-stats', (req, res) => {
   const MAX_BYTES = 100 * 1024 * 1024 // 100 MB practical limit
   let totalBytes = 0
   const files = {}
-  ;[DB_PATH, ANALYSIS_PATH].forEach((p) => {
+  ;[DB_PATH, ANALYSIS_PATH, TX_PATH].forEach((p) => {
     try {
       const s = statSync(p)
       const name = p.split('/').pop()
@@ -74,7 +75,7 @@ app.post('/api/assets', (req, res) => {
 
   const db = readDB()
   const id = Date.now().toString(36) + Math.random().toString(36).substr(2, 5)
-  const asset = { id, ticker: ticker.toUpperCase(), name: name || ticker.toUpperCase(), category, price: price || 0, image: image || null }
+  const asset = { id, ticker: ticker.toUpperCase(), name: name || ticker.toUpperCase(), category, price: price || 0, image: image || null, shares: 0, entryPrice: 0 }
 
   if (category === 'actives') db.actives.push(asset)
   else db.watchlist.push(asset)
@@ -105,6 +106,8 @@ app.put('/api/assets/:id', (req, res) => {
   if (name !== undefined) asset.name = name
   if (image !== undefined) asset.image = image
   if (category) asset.category = category
+  if (req.body.shares !== undefined) asset.shares = req.body.shares
+  if (req.body.entryPrice !== undefined) asset.entryPrice = req.body.entryPrice
 
   const targetCat = category || asset.category
   if (targetCat === 'actives') db.actives.push(asset)
@@ -183,6 +186,96 @@ app.post('/api/analysis/:ticker', (req, res) => {
   writeAnalysisDB(db)
   console.log(`[Save] ${key}: cashFlow=${cfLen} entries`)
   res.json({ ok: true })
+})
+
+// ─── Transactions persistence ───────────────────────────────────────────────
+function readTxDB() {
+  if (!existsSync(TX_PATH)) return []
+  try {
+    return JSON.parse(readFileSync(TX_PATH, 'utf-8'))
+  } catch {
+    return []
+  }
+}
+
+function writeTxDB(data) {
+  writeFileSync(TX_PATH, JSON.stringify(data, null, 2))
+}
+
+// GET all transactions (optionally filter by asset_id)
+app.get('/api/transactions', (req, res) => {
+  const txs = readTxDB()
+  const { asset_id } = req.query
+  if (asset_id) {
+    return res.json(txs.filter(t => t.asset_id === asset_id))
+  }
+  res.json(txs)
+})
+
+// POST add a new transaction
+app.post('/api/transactions', (req, res) => {
+  const { asset_id, ticker, transaction_date, shares, price_per_share, currency, note } = req.body
+  if (!asset_id || !ticker || shares == null || price_per_share == null) {
+    return res.status(400).json({ error: 'asset_id, ticker, shares, and price_per_share required' })
+  }
+
+  const txs = readTxDB()
+  const id = Date.now().toString(36) + Math.random().toString(36).substr(2, 5)
+  const tx = {
+    id,
+    asset_id,
+    ticker: ticker.toUpperCase(),
+    transaction_date: transaction_date || new Date().toISOString().split('T')[0],
+    shares: Number(shares),
+    price_per_share: Number(price_per_share),
+    currency: currency || 'USD',
+    note: note || '',
+    created_at: new Date().toISOString(),
+  }
+
+  txs.push(tx)
+  writeTxDB(txs)
+  res.json(tx)
+})
+
+// PUT update a transaction
+app.put('/api/transactions/:id', (req, res) => {
+  const { id } = req.params
+  const txs = readTxDB()
+  const idx = txs.findIndex(t => t.id === id)
+  if (idx === -1) return res.status(404).json({ error: 'Transaction not found' })
+
+  const { transaction_date, shares, price_per_share, currency, note } = req.body
+  if (transaction_date !== undefined) txs[idx].transaction_date = transaction_date
+  if (shares !== undefined) txs[idx].shares = Number(shares)
+  if (price_per_share !== undefined) txs[idx].price_per_share = Number(price_per_share)
+  if (currency !== undefined) txs[idx].currency = currency
+  if (note !== undefined) txs[idx].note = note
+
+  writeTxDB(txs)
+  res.json(txs[idx])
+})
+
+// DELETE a transaction
+app.delete('/api/transactions/:id', (req, res) => {
+  const { id } = req.params
+  const txs = readTxDB().filter(t => t.id !== id)
+  writeTxDB(txs)
+  res.json({ ok: true })
+})
+
+// ─── Yahoo Finance: Tipo de cambio EUR/USD ──────────────────────────────────
+app.get('/api/forex', async (req, res) => {
+  try {
+    const { pair } = req.query
+    const symbol = pair || 'EURUSD=X'
+    const quote = await yf.quote(symbol)
+    const rate = quote?.regularMarketPrice || null
+    res.json({ symbol, rate, timestamp: new Date().toISOString() })
+  } catch (err) {
+    console.error('Error /api/forex:', err.message)
+    res.json({ symbol: 'EURUSD=X', rate: null, error: err.message })
+  }
 })
 
 // ─── FMP: Cash Flow Statement (para sostenibilidad del dividendo) ────────────
