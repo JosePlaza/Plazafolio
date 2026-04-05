@@ -80,14 +80,30 @@ async function getUserId() {
 
 async function loadFromSupabase() {
   const userId = await getUserId()
-  if (!userId) return null
+  if (!userId) {
+    console.warn('[Settings] No user ID — cannot load from Supabase')
+    return null
+  }
   try {
     const { data, error } = await supabase
       .from('user_settings')
-      .select('gemini_api_key_enc')
+      .select('gemini_api_key_enc, updated_at')
       .eq('user_id', userId)
       .maybeSingle()
-    if (error || !data?.gemini_api_key_enc) return null
+
+    if (error) {
+      console.warn('[Settings] Supabase load error:', error.message, error.code)
+      return null
+    }
+    if (!data) {
+      console.log('[Settings] No settings row found in Supabase for user')
+      return null
+    }
+    if (!data.gemini_api_key_enc) {
+      console.log('[Settings] Settings row exists but no encrypted key')
+      return null
+    }
+    console.log('[Settings] Found encrypted key in Supabase (updated:', data.updated_at, ')')
     return await decrypt(data.gemini_api_key_enc, userId)
   } catch (err) {
     console.warn('[Settings] Supabase load failed:', err.message)
@@ -97,19 +113,52 @@ async function loadFromSupabase() {
 
 async function saveToSupabase(apiKey) {
   const userId = await getUserId()
-  if (!userId) return
+  if (!userId) {
+    console.warn('[Settings] No user ID — cannot save to Supabase')
+    return
+  }
+
+  const enc = apiKey ? await encrypt(apiKey, userId) : null
+  console.log('[Settings] Saving to Supabase for user:', userId.substring(0, 8) + '...')
+
+  // Step 1: Check if row exists
   try {
-    const enc = apiKey ? await encrypt(apiKey, userId) : null
-    const { error } = await supabase
+    const { data: existing, error: readErr } = await supabase
       .from('user_settings')
-      .upsert({
-        user_id: userId,
-        gemini_api_key_enc: enc,
-      }, { onConflict: 'user_id' })
-    if (error) throw error
-    console.log('[Settings] Saved to Supabase')
+      .select('user_id')
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (readErr) {
+      console.error('[Settings] Read check failed:', readErr.message, readErr.code, readErr.details)
+    }
+
+    if (existing) {
+      // Row exists — UPDATE
+      console.log('[Settings] Row exists, updating...')
+      const { error: updateErr } = await supabase
+        .from('user_settings')
+        .update({ gemini_api_key_enc: enc })
+        .eq('user_id', userId)
+      if (updateErr) {
+        console.error('[Settings] UPDATE failed:', updateErr.message, updateErr.code, updateErr.details)
+        return
+      }
+      console.log('[Settings] Updated in Supabase ✓')
+    } else {
+      // No row — INSERT
+      console.log('[Settings] No row found, inserting...')
+      const { error: insertErr } = await supabase
+        .from('user_settings')
+        .insert({ user_id: userId, gemini_api_key_enc: enc })
+      if (insertErr) {
+        console.error('[Settings] INSERT failed:', insertErr.message, insertErr.code, insertErr.details)
+        return
+      }
+      console.log('[Settings] Inserted in Supabase ✓')
+    }
   } catch (err) {
-    console.warn('[Settings] Supabase save failed:', err.message)
+    console.error('[Settings] Supabase save exception:', err)
   }
 }
 
