@@ -937,7 +937,7 @@ function fmtDate(dateStr) {
 </script>
 
 <template>
-  <div class="max-w-4xl mx-auto">
+  <div class="max-w-4xl mx-auto overflow-x-hidden">
     <!-- ═══ SEC Report Drilldown (replaces everything) ═══ -->
     <SecReportDetail
       v-if="selectedSecReport"
@@ -1092,7 +1092,7 @@ function fmtDate(dateStr) {
     <!-- ═══ Consolidated KPIs Card ═══ -->
     <div class="glass-card p-4 mb-4">
       <!-- Row 1: Market metrics -->
-      <div class="grid grid-cols-4 gap-x-4 gap-y-0.5">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-x-3 sm:gap-x-4 gap-y-2 sm:gap-y-0.5">
         <div>
           <div class="text-[10px] uppercase text-zinc-400 tracking-wider mb-0.5">Precio</div>
           <div class="text-base font-bold text-foreground tabular-nums"><AnimatedNumber :value="convertedCurrentPrice" :prefix="sym" /></div>
@@ -1103,7 +1103,7 @@ function fmtDate(dateStr) {
         </div>
         <div>
           <div class="text-[10px] uppercase text-zinc-400 tracking-wider mb-0.5">Zona</div>
-          <div class="text-sm font-bold" :style="{ color: zone.color }">{{ zone.label }}</div>
+          <div class="text-sm font-bold truncate" :style="{ color: zone.color }">{{ zone.label }}</div>
         </div>
         <div>
           <div class="text-[10px] uppercase text-zinc-400 tracking-wider mb-0.5">CAGR Div.</div>
@@ -1114,7 +1114,7 @@ function fmtDate(dateStr) {
       </div>
 
       <!-- Row 2: Position metrics (if has position) -->
-      <div v-if="hasPosition" class="grid grid-cols-4 gap-x-4 mt-3 pt-3 border-t border-white/5">
+      <div v-if="hasPosition" class="grid grid-cols-2 sm:grid-cols-4 gap-x-3 sm:gap-x-4 gap-y-2 mt-3 pt-3 border-t border-white/5">
         <div>
           <div class="text-[10px] uppercase text-zinc-400 tracking-wider mb-0.5">Valor</div>
           <div class="text-base font-bold text-foreground tabular-nums"><AnimatedNumber :value="positionValue" :prefix="sym" :decimals="0" /></div>
@@ -1322,7 +1322,7 @@ function fmtDate(dateStr) {
         </div>
         <div ref="dcaChartContainer" class="w-full" style="height: 260px;"></div>
         <!-- Summary KPIs -->
-        <div class="grid grid-cols-3 gap-4 mt-3 pt-3 border-t border-white/5">
+        <div class="grid grid-cols-3 gap-2 sm:gap-4 mt-3 pt-3 border-t border-white/5">
           <div>
             <div class="text-[10px] text-zinc-400 uppercase tracking-wider mb-0.5">5 años</div>
             <div class="text-sm font-bold text-emerald-400 tabular-nums">{{ sym }}{{ fmtK(dcaProjection.income5y) }}/año</div>
