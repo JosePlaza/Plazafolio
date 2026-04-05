@@ -68,3 +68,17 @@ export async function getFundamentalsData(ticker) {
   })
   return data || { income: [], balance: [], cashFlow: [], enterpriseValue: null }
 }
+
+/**
+ * Obtener informe SEC (comparativa de los 2 últimos 10-Q o 10-K)
+ * Solo para acciones americanas
+ * @param {string} ticker
+ * @param {string} type - '10-Q' o '10-K'
+ * @returns {Promise<Object|null>}
+ */
+export async function getSecReport(ticker, type = '10-Q') {
+  const { data } = await api.get('/sec/report', {
+    params: { ticker, type },
+  })
+  return data || null
+}

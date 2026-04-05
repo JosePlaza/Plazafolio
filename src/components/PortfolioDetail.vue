@@ -7,6 +7,9 @@ import AnimatedNumber from '@/components/AnimatedNumber.vue'
 import ToastNotification from '@/components/ToastNotification.vue'
 import DatePicker from '@/components/DatePicker.vue'
 import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
+import SecReportDetail from '@/components/SecReportDetail.vue'
+import { useSettings } from '@/composables/useSettings'
+import { fetchSecReports as fetchSecReportsApi, regenerateNarrative as regenerateNarrativeApi, generateReportAudio } from '@/services/secReportsApi'
 
 const props = defineProps({
   asset: { type: Object, required: true },
@@ -20,6 +23,7 @@ const emit = defineEmits(['back', 'save'])
 
 const { symbolFor, convert, convertByTicker, nativeCurrencyOf, forcedCurrency, eurUsdRate } = useCurrency()
 const { transactionsForAsset, positionForAsset, addTransaction, removeTransaction, editTransaction, load: loadTx } = useTransactions()
+const { geminiApiKey } = useSettings()
 
 // cv() for use inside computeds (charts) — reactive via computed tracking
 const cv = (val) => convertByTicker(val, props.asset.ticker)
@@ -769,9 +773,147 @@ watch(() => dcaProjection.value?.detectedMonthlyInvestment, (detected) => {
   }
 }, { immediate: true })
 
+// ── SEC Reports (list + drilldown) ──
+const isUsStock = computed(() => !props.asset.ticker.includes('.'))
+const secAllReports = ref([]) // merged 10-Q + 10-K, sorted by date
+const secReportsLoading = ref(false)
+const secReportsError = ref(null)
+const secNarrativeError = ref('')
+const selectedSecReport = ref(null) // the report being drilled into
+
+// Keep secReportsData as computed for backward compat in template
+const secReportsData = computed(() => ({
+  reports: secAllReports.value,
+  hasNarrative: secAllReports.value.some(r => r.narrative),
+  narrativeError: secNarrativeError.value,
+}))
+
+async function fetchSecReports() {
+  if (!isUsStock.value) return
+  secReportsLoading.value = true
+  secReportsError.value = null
+  secNarrativeError.value = ''
+  try {
+    // Fetch both types in parallel
+    const [quarterly, annual] = await Promise.all([
+      fetchSecReportsApi(props.asset.ticker, '10-Q').catch(() => ({ reports: [] })),
+      fetchSecReportsApi(props.asset.ticker, '10-K').catch(() => ({ reports: [] })),
+    ])
+
+    // Merge, sort by filedDate descending, limit to ~5 years of data
+    const fiveYearsAgo = new Date()
+    fiveYearsAgo.setFullYear(fiveYearsAgo.getFullYear() - 5)
+    const cutoff = fiveYearsAgo.toISOString().slice(0, 10)
+
+    const all = [
+      ...(quarterly.reports || []),
+      ...(annual.reports || []),
+    ]
+      .filter(r => !r.filedDate || r.filedDate >= cutoff)
+      .sort((a, b) => (b.filedDate || '').localeCompare(a.filedDate || ''))
+
+    secAllReports.value = all
+    secNarrativeError.value = quarterly.narrativeError || annual.narrativeError || ''
+  } catch (err) {
+    console.error('Error fetching SEC reports:', err)
+    secReportsError.value = err.message
+    secAllReports.value = []
+  } finally {
+    secReportsLoading.value = false
+  }
+}
+
+function openSecReport(report) {
+  selectedSecReport.value = report
+  // Auto-generate narrative if missing and user has API key
+  if (!report.narrative && geminiApiKey.value) {
+    generateNarrativeForReport(report).then(() => {
+      // Once narrative is ready, auto-generate audio if not present
+      if (selectedSecReport.value?.narrative && !selectedSecReport.value.audioUrl) {
+        onGenerateAudio()
+      }
+    })
+  } else if (report.narrative && !report.audioUrl && geminiApiKey.value) {
+    // Narrative exists but no audio — auto-generate
+    onGenerateAudio()
+  }
+}
+
+function closeSecReport() {
+  selectedSecReport.value = null
+}
+
+/** Generate or regenerate narrative for a single report on-demand */
+async function generateNarrativeForReport(report) {
+  if (!geminiApiKey.value) return
+  try {
+    report.narrative = 'Generando resumen con IA...'
+    report.narrativeSources = []
+    const data = await regenerateNarrativeApi(report.id, geminiApiKey.value)
+    if (data.ok) {
+      report.narrative = data.narrative
+      report.narrativeSources = data.narrativeSources || []
+      // Also update in the list
+      const listReport = secAllReports.value.find(r => r.id === report.id)
+      if (listReport) {
+        listReport.narrative = data.narrative
+        listReport.narrativeSources = data.narrativeSources || []
+      }
+    } else {
+      report.narrative = null
+      secNarrativeError.value = data.error || 'Error al generar resumen'
+      console.warn('[SEC] Narrative generation failed:', data.error)
+    }
+  } catch (err) {
+    report.narrative = null
+    secNarrativeError.value = err.message
+    console.warn('[SEC] Narrative error:', err.message)
+  }
+}
+
+/** Regenerate narrative (called from detail view button) */
+function regenerateNarrative() {
+  if (!selectedSecReport.value) return
+  generateNarrativeForReport(selectedSecReport.value)
+}
+
+/** Generate audio narration for the currently selected report */
+const generatingAudio = ref(false)
+async function onGenerateAudio() {
+  if (!selectedSecReport.value || !geminiApiKey.value || generatingAudio.value) return
+  generatingAudio.value = true
+  try {
+    const data = await generateReportAudio(selectedSecReport.value.id, geminiApiKey.value)
+    if (data.ok && data.audioUrl) {
+      selectedSecReport.value.audioUrl = data.audioUrl
+      // Also update in the list
+      const listReport = secAllReports.value.find(r => r.id === selectedSecReport.value.id)
+      if (listReport) listReport.audioUrl = data.audioUrl
+    } else {
+      console.warn('[SEC] Audio generation failed:', data.error)
+    }
+  } catch (err) {
+    console.warn('[SEC] Audio error:', err.message)
+  } finally {
+    generatingAudio.value = false
+  }
+}
+
+function secReportSentiment(report) {
+  const signals = report.diagnosis?.signals || []
+  const pos = signals.filter(s => s.type === 'positive').length
+  const neg = signals.filter(s => s.type === 'negative').length
+  if (pos > neg * 2) return 'positive'
+  if (neg > pos * 2) return 'negative'
+  if (pos > neg) return 'mixed-positive'
+  if (neg > pos) return 'mixed-negative'
+  return 'neutral'
+}
+
 onMounted(() => {
   loadTx()
   fetchPriceData()
+  fetchSecReports()
   setTimeout(renderDcaChart, 200)
 })
 onBeforeUnmount(() => {
@@ -796,6 +938,20 @@ function fmtDate(dateStr) {
 
 <template>
   <div class="max-w-4xl mx-auto">
+    <!-- ═══ SEC Report Drilldown (replaces everything) ═══ -->
+    <SecReportDetail
+      v-if="selectedSecReport"
+      :report="selectedSecReport"
+      :ticker="asset.ticker"
+      :narrative-error="secReportsData?.narrativeError || ''"
+      :generating-audio="generatingAudio"
+      @back="closeSecReport"
+      @regenerate="regenerateNarrative"
+      @generate-audio="onGenerateAudio"
+    />
+
+    <!-- ═══ Normal portfolio detail view ═══ -->
+    <template v-else>
     <!-- Back + Header -->
     <div class="flex items-center gap-4 mb-6">
       <button
@@ -1145,7 +1301,7 @@ function fmtDate(dateStr) {
     </div>
 
     <!-- ═══ DCA Projection Card ═══ -->
-    <div v-if="dcaProjection && dcaProjection.projectedYears.length" class="glass-card p-4">
+    <div v-if="dcaProjection && dcaProjection.projectedYears.length" class="glass-card p-4 mb-4">
       <ChartInfoOverlay description="Proyecta tus ingresos por dividendos a 15 años si mantienes un plan de compra mensual (DCA). Las barras verdes son datos reales y las translúcidas son la proyección. La línea amarilla muestra tu Yield on Cost (rentabilidad sobre tu inversión total). Ajusta el importe mensual con el slider para ver cómo cambia tu futuro ingreso pasivo.">
         <h3 class="text-xs font-semibold text-foreground uppercase tracking-wider mb-0.5">Proyección DCA</h3>
         <div class="text-[10px] text-zinc-500 mb-2">CAGR dividendo {{ fmt(cagr) }}%</div>
@@ -1186,6 +1342,71 @@ function fmtDate(dateStr) {
       </ChartInfoOverlay>
     </div>
 
+    <!-- ═══ Informes de Resultados (list card) ═══ -->
+    <div v-if="isUsStock" class="glass-card p-4">
+      <div class="mb-3">
+        <h3 class="text-xs font-semibold text-foreground uppercase tracking-wider">Informes de resultados</h3>
+      </div>
+
+      <!-- Loading state -->
+      <div v-if="secReportsLoading" class="flex items-center justify-center py-8">
+        <div class="w-5 h-5 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin"></div>
+        <span class="ml-2 text-xs text-zinc-400">Consultando SEC EDGAR...</span>
+      </div>
+
+      <!-- Error state -->
+      <div v-else-if="secReportsError" class="text-center py-6">
+        <div class="text-zinc-500 text-xs">{{ secReportsError }}</div>
+      </div>
+
+      <!-- Report list -->
+      <div v-else-if="secAllReports.length" class="space-y-1">
+        <button
+          v-for="report in secAllReports"
+          :key="report.id"
+          @click="openSecReport(report)"
+          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/[0.04] transition-colors text-left group"
+        >
+          <!-- Sentiment indicator -->
+          <div class="w-2 h-2 rounded-full shrink-0" :class="{
+            'bg-emerald-400': secReportSentiment(report) === 'positive',
+            'bg-emerald-400/50': secReportSentiment(report) === 'mixed-positive',
+            'bg-red-400': secReportSentiment(report) === 'negative',
+            'bg-red-400/50': secReportSentiment(report) === 'mixed-negative',
+            'bg-zinc-500': secReportSentiment(report) === 'neutral',
+          }"></div>
+          <!-- Report type badge -->
+          <span class="px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 tabular-nums" :class="
+            report.reportType === '10-K'
+              ? 'bg-amber-500/10 text-amber-400/80'
+              : 'bg-blue-500/10 text-blue-400/70'
+          ">{{ report.reportType }}</span>
+          <!-- Period + summary -->
+          <div class="flex-1 min-w-0">
+            <div class="text-[11px] font-medium text-foreground">{{ report.periodCurrent }}</div>
+            <div class="text-[10px] text-zinc-500 truncate">{{ report.diagnosis?.summary || 'Sin diagnóstico' }}</div>
+          </div>
+          <!-- Filed date -->
+          <div class="text-[10px] text-zinc-500 tabular-nums shrink-0">{{ fmtDate(report.filedDate) }}</div>
+          <!-- Narrative indicator -->
+          <div v-if="report.narrative" class="text-[9px] text-amber-400/60 shrink-0" title="Resumen IA disponible">✦</div>
+          <!-- Arrow -->
+          <svg class="w-3.5 h-3.5 text-zinc-500 group-hover:text-zinc-300 transition-colors shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- No data -->
+      <div v-else-if="!secReportsLoading" class="text-center py-6">
+        <div class="text-zinc-500 text-xs">No hay informes disponibles</div>
+      </div>
+
+      <div v-if="secReportsData?.hasNarrative" class="mt-2 text-[9px] text-zinc-500 text-center">
+        ✦ Resumen ejecutivo por IA disponible
+      </div>
+    </div>
+
     <!-- Toast notification -->
     <ToastNotification
       :visible="toastVisible"
@@ -1193,6 +1414,7 @@ function fmtDate(dateStr) {
       :type="toastType"
       @close="toastVisible = false"
     />
+    </template><!-- end v-else (normal portfolio detail) -->
 
     <!-- 3-dot dropdown menu (Teleport) -->
     <Teleport to="body">

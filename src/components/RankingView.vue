@@ -37,7 +37,9 @@ const rankedAssets = computed(() => {
       const { indicators } = cached.data
       const projection = cached.data.projection
       const dividends = cached.data.dividends
-      const scoring = computeBuyScore(indicators, projection, dividends)
+      const cashFlow = cached.data.cashFlow || null
+      const fundamentals = cached.data.fundamentals || null
+      const scoring = computeBuyScore(indicators, projection, dividends, cashFlow, fundamentals)
       return {
         ...asset,
         score: scoring.score,
@@ -133,56 +135,89 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
           <Transition name="pop-fade">
             <div
               v-if="showScoringInfo"
-              class="absolute right-0 top-full mt-2 z-50 w-80"
+              class="absolute right-0 top-full mt-2 z-50 w-[calc(100vw-2rem)] sm:w-80 max-w-[320px]"
               style="background: rgba(14, 14, 22, 0.95); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.5);"
             >
               <div class="p-4">
                 <h3 class="text-xs font-semibold text-foreground uppercase tracking-wider mb-3">Cómo se calcula el Score</h3>
                 <p class="text-[11px] text-zinc-400 leading-relaxed mb-3">
-                  El score (0-100) combina 4 factores según el método Geraldine Weiss para determinar la prioridad de compra.
+                  El score (0-100) combina 7 factores según el método Geraldine Weiss para determinar la prioridad de compra.
                 </p>
 
                 <!-- Factor 1 -->
-                <div class="mb-3">
+                <div class="mb-2">
                   <div class="flex items-center justify-between mb-0.5">
                     <span class="text-[10px] font-semibold text-zinc-300">Y · Posición del Yield</span>
-                    <span class="text-[9px] text-primary font-bold">0 – 70 pts</span>
+                    <span class="text-[9px] text-primary font-bold">0 – 45 pts</span>
                   </div>
                   <p class="text-[10px] text-zinc-400 leading-relaxed">
-                    Mide dónde está el yield actual dentro del rango histórico. Yield cerca o por encima del promedio alto = zona de compra (50-70 pts). Cerca del bajo = zona cara (0-15 pts).
+                    Yield cerca del promedio alto = zona de compra. Factor dominante del método Geraldine Weiss.
                   </p>
                 </div>
 
                 <!-- Factor 2 -->
-                <div class="mb-3">
+                <div class="mb-2">
                   <div class="flex items-center justify-between mb-0.5">
                     <span class="text-[10px] font-semibold text-zinc-300">C · Crecimiento CAGR</span>
-                    <span class="text-[9px] text-primary font-bold">0 – 15 pts</span>
+                    <span class="text-[9px] text-primary font-bold">0 – 12 pts</span>
                   </div>
                   <p class="text-[10px] text-zinc-400 leading-relaxed">
-                    Premia el crecimiento sostenido del dividendo. CAGR 5% ≈ 7.5 pts, 10% ≈ 12.5 pts, 15%+ = 15 pts. CAGR negativo penaliza hasta -5 pts.
+                    Crecimiento sostenido del dividendo. CAGR negativo penaliza.
                   </p>
                 </div>
 
                 <!-- Factor 3 -->
-                <div class="mb-3">
+                <div class="mb-2">
                   <div class="flex items-center justify-between mb-0.5">
                     <span class="text-[10px] font-semibold text-zinc-300">S · Consistencia</span>
-                    <span class="text-[9px] text-primary font-bold">0 – 10 pts</span>
+                    <span class="text-[9px] text-primary font-bold">0 – 8 pts</span>
                   </div>
                   <p class="text-[10px] text-zinc-400 leading-relaxed">
-                    Años consecutivos pagando dividendo. 5 años = 5 pts, 10+ años = 10 pts. Más años = empresa más fiable.
+                    Años consecutivos pagando dividendo. Más años = empresa más fiable.
                   </p>
                 </div>
 
                 <!-- Factor 4 -->
-                <div class="mb-3">
+                <div class="mb-2">
                   <div class="flex items-center justify-between mb-0.5">
                     <span class="text-[10px] font-semibold text-zinc-300">M · Margen de seguridad</span>
                     <span class="text-[9px] text-primary font-bold">0 – 5 pts</span>
                   </div>
                   <p class="text-[10px] text-zinc-400 leading-relaxed">
-                    Potencial alcista hasta el precio de infravaloración. 30%+ de upside = 5 pts máximo.
+                    Potencial alcista hasta el precio de infravaloración.
+                  </p>
+                </div>
+
+                <!-- Factor 5 -->
+                <div class="mb-2">
+                  <div class="flex items-center justify-between mb-0.5">
+                    <span class="text-[10px] font-semibold text-zinc-300">K · Racha de dividendo</span>
+                    <span class="text-[9px] text-primary font-bold">0 – 12 pts</span>
+                  </div>
+                  <p class="text-[10px] text-zinc-400 leading-relaxed">
+                    Años consecutivos incrementando el dividendo. 25+ años = Aristocrat (12 pts).
+                  </p>
+                </div>
+
+                <!-- Factor 6 -->
+                <div class="mb-2">
+                  <div class="flex items-center justify-between mb-0.5">
+                    <span class="text-[10px] font-semibold text-zinc-300">P · Payout ratio</span>
+                    <span class="text-[9px] text-primary font-bold">-8 / +5 pts</span>
+                  </div>
+                  <p class="text-[10px] text-zinc-400 leading-relaxed">
+                    Payout &lt;30% = bonus. &gt;85% = penalización. Basado en FCF.
+                  </p>
+                </div>
+
+                <!-- Factor 7 -->
+                <div class="mb-2">
+                  <div class="flex items-center justify-between mb-0.5">
+                    <span class="text-[10px] font-semibold text-zinc-300">F · Fundamentales</span>
+                    <span class="text-[9px] text-primary font-bold">-7 / +5 pts</span>
+                  </div>
+                  <p class="text-[10px] text-zinc-400 leading-relaxed">
+                    Deuda/EBITDA y dilución de acciones. Baja deuda y recompras = bonus.
                   </p>
                 </div>
 
@@ -377,18 +412,20 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
                   {{ item.projection.cagr >= 0 ? '+' : '' }}{{ fmt(item.projection.cagr) }}%
                 </span>
               </div>
-              <div class="flex gap-1.5 ml-auto">
+              <div class="flex gap-1.5 ml-auto flex-wrap justify-end">
                 <span class="text-[9px] tabular-nums" style="color: #a1a1aa;">Y:{{ item.scoring.breakdown.yield }}</span>
                 <span class="text-[9px] tabular-nums" style="color: #a1a1aa;">C:{{ item.scoring.breakdown.cagr }}</span>
                 <span class="text-[9px] tabular-nums" style="color: #a1a1aa;">S:{{ item.scoring.breakdown.consistency }}</span>
-                <span class="text-[9px] tabular-nums" style="color: #a1a1aa;">M:{{ item.scoring.breakdown.margin }}</span>
+                <span class="text-[9px] tabular-nums" style="color: #a1a1aa;">K:{{ item.scoring.breakdown.streak }}</span>
+                <span class="text-[9px] tabular-nums" :style="{ color: item.scoring.breakdown.payout < 0 ? '#f87171' : '#a1a1aa' }">P:{{ item.scoring.breakdown.payout }}</span>
+                <span class="text-[9px] tabular-nums" :style="{ color: item.scoring.breakdown.fundamentals < 0 ? '#f87171' : '#a1a1aa' }">F:{{ item.scoring.breakdown.fundamentals }}</span>
               </div>
             </div>
           </div>
         </div>
 
         <!-- Desktop layout: single row -->
-        <div class="hidden sm:flex items-center gap-4">
+        <div class="hidden sm:flex items-center gap-3 lg:gap-4">
           <!-- Position -->
           <div
             class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
@@ -433,13 +470,13 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
           </div>
 
           <!-- Yield info -->
-          <div v-if="item.indicators" class="text-right shrink-0 w-20">
+          <div v-if="item.indicators" class="text-right shrink-0 w-16 lg:w-20">
             <div class="text-[10px] uppercase" style="color: #71717a;">Yield</div>
             <div class="text-sm font-bold text-primary">{{ fmt(item.indicators.currentYield) }}%</div>
           </div>
 
           <!-- CAGR -->
-          <div v-if="item.projection" class="text-right shrink-0 w-20">
+          <div v-if="item.projection" class="text-right shrink-0 w-16 lg:w-20">
             <div class="text-[10px] uppercase" style="color: #71717a;">CAGR</div>
             <div
               class="text-sm font-semibold"
@@ -450,7 +487,7 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
           </div>
 
           <!-- Score bar + signal -->
-          <div v-if="item.scoring" class="shrink-0 w-44">
+          <div v-if="item.scoring" class="shrink-0 w-36 lg:w-44">
             <div class="flex items-center justify-between mb-1">
               <span
                 class="text-[10px] font-semibold uppercase tracking-wider"
@@ -469,16 +506,18 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
                 }"
               ></div>
             </div>
-            <div class="flex gap-2 mt-1">
-              <span class="text-[8px]" style="color: #a1a1aa;" title="Yield position">Y:{{ item.scoring.breakdown.yield }}</span>
-              <span class="text-[8px]" style="color: #a1a1aa;" title="CAGR bonus">C:{{ item.scoring.breakdown.cagr }}</span>
-              <span class="text-[8px]" style="color: #a1a1aa;" title="Consistency">S:{{ item.scoring.breakdown.consistency }}</span>
-              <span class="text-[8px]" style="color: #a1a1aa;" title="Safety margin">M:{{ item.scoring.breakdown.margin }}</span>
+            <div class="flex gap-1.5 mt-1 flex-wrap">
+              <span class="text-[8px]" style="color: #a1a1aa;" title="Posición del yield">Y:{{ item.scoring.breakdown.yield }}</span>
+              <span class="text-[8px]" style="color: #a1a1aa;" title="Crecimiento CAGR">C:{{ item.scoring.breakdown.cagr }}</span>
+              <span class="text-[8px]" style="color: #a1a1aa;" title="Consistencia">S:{{ item.scoring.breakdown.consistency }}</span>
+              <span class="text-[8px]" style="color: #a1a1aa;" title="Racha de incremento">K:{{ item.scoring.breakdown.streak }}</span>
+              <span class="text-[8px]" :style="{ color: item.scoring.breakdown.payout < 0 ? '#f87171' : '#a1a1aa' }" title="Payout ratio">P:{{ item.scoring.breakdown.payout }}</span>
+              <span class="text-[8px]" :style="{ color: item.scoring.breakdown.fundamentals < 0 ? '#f87171' : '#a1a1aa' }" title="Fundamentales">F:{{ item.scoring.breakdown.fundamentals }}</span>
             </div>
           </div>
 
           <!-- No data state -->
-          <div v-else class="shrink-0 w-44 text-right">
+          <div v-else class="shrink-0 w-36 lg:w-44 text-right">
             <span class="text-[10px] text-muted-foreground/50">Sin análisis</span>
             <p class="text-[9px] text-muted-foreground/30 mt-0.5">Analiza este activo primero</p>
           </div>

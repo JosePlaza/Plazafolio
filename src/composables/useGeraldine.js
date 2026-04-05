@@ -94,7 +94,7 @@ export function useGeraldine() {
   /**
    * Guarda el resultado del análisis en el servidor
    */
-  async function saveToCache(tickerSymbol, periodYears, result, profile) {
+  async function saveToCache(tickerSymbol, periodYears, result, profile, cashFlow, fundamentals) {
     try {
       // Only save lightweight data needed for ranking + cache check.
       // Heavy chart data (priceBands, dailyYields, drawdown) is NOT cached
@@ -103,6 +103,8 @@ export function useGeraldine() {
         indicators: result.indicators,
         projection: result.projection,
         dividends: result.dividends,
+        cashFlow: cashFlow || null,
+        fundamentals: fundamentals || null,
       }, profile)
     } catch (err) {
       console.warn('Error guardando análisis en cache:', err.message)
@@ -151,7 +153,7 @@ export function useGeraldine() {
         try {
           const { result, profile, cashFlow, fundamentals } = await fetchAndCompute(ticker.value, periodYears)
           applyData(result, profile, cashFlow, fundamentals)
-          await saveToCache(ticker.value, periodYears, result, profile)
+          await saveToCache(ticker.value, periodYears, result, profile, cashFlow, fundamentals)
         } catch (err) {
           console.error('Error generando análisis:', err)
           error.value = err.message || 'Error al obtener datos'

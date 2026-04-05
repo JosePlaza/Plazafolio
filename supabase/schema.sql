@@ -132,3 +132,51 @@ select cron.schedule(
   );
   $$
 );
+
+-- ============================================================================
+-- 8. SEC / Financial reports cache (Phase 1: SEC EDGAR, extensible to others)
+--    Shared across all users — XBRL data is public, no RLS needed
+-- ============================================================================
+create table if not exists public.financial_reports (
+  id text primary key,                           -- e.g. 'NKE_10-Q_2025-11-30'
+  ticker text not null,
+  source text not null default 'sec',            -- 'sec', 'cnmv', 'lse', etc.
+  report_type text not null,                     -- '10-K', '10-Q', etc.
+  period_current text not null,                  -- e.g. 'Q1 2026' or 'FY2025'
+  period_previous text not null,                 -- e.g. 'Q4 2025' or 'FY2024'
+  report_date date,                              -- end of reporting period
+  filed_date date,                               -- SEC filing date
+  metrics jsonb not null default '{}',           -- { revenue: {label,current,previous,change,...}, ... }
+  diagnosis jsonb not null default '{}',         -- { summary, signals: [...] }
+  narrative text,                                -- LLM-generated analysis (nullable)
+  fetched_at timestamptz default now(),
+  expires_at timestamptz default (now() + interval '7 days')
+);
+
+create index if not exists idx_financial_reports_ticker on public.financial_reports(ticker);
+create index if not exists idx_financial_reports_ticker_type on public.financial_reports(ticker, report_type);
+create index if not exists idx_financial_reports_expires on public.financial_reports(expires_at);
+
+-- 9. User settings (API keys, preferences — per user, RLS protected)
+-- ============================================================================
+create table if not exists public.user_settings (
+  user_id uuid references auth.users(id) on delete cascade primary key,
+  gemini_api_key_enc text,                       -- encrypted with user-derived key
+  preferences jsonb not null default '{}',       -- future: theme, language, etc.
+  updated_at timestamptz default now()
+);
+
+alter table public.user_settings enable row level security;
+
+create policy "Users read own settings"
+  on public.user_settings for select using (auth.uid() = user_id);
+create policy "Users insert own settings"
+  on public.user_settings for insert with check (auth.uid() = user_id);
+create policy "Users update own settings"
+  on public.user_settings for update using (auth.uid() = user_id);
+create policy "Users delete own settings"
+  on public.user_settings for delete using (auth.uid() = user_id);
+
+create trigger user_settings_updated_at
+  before update on public.user_settings
+  for each row execute function public.update_updated_at();

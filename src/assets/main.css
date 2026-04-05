@@ -341,10 +341,17 @@ input[type="number"] {
 }
 
 /* ── Header tabs ─────────────────────────────────────────────────── */
+.header-tabs-nav {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.header-tabs-nav::-webkit-scrollbar {
+  display: none;
+}
 .header-tab {
-  padding: 6px 16px;
+  padding: 5px 10px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: #71717a;
   background: transparent;
@@ -352,6 +359,13 @@ input[type="number"] {
   cursor: pointer;
   transition: all 0.2s ease;
   position: relative;
+  flex-shrink: 0;
+}
+@media (min-width: 640px) {
+  .header-tab {
+    padding: 6px 16px;
+    font-size: 13px;
+  }
 }
 .header-tab:hover {
   color: #a1a1aa;

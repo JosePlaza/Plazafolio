@@ -3,6 +3,18 @@ import express from 'express'
 import cors from 'cors'
 import YahooFinance from 'yahoo-finance2'
 import { readFileSync, writeFileSync, existsSync, statSync } from 'fs'
+import { fetchReportList, getLatestFilingDate, isUsTicker } from './sec-edgar.js'
+import { generateNarrative, generateAudio, testApiKey, checkModelsStatus } from './llm-provider.js'
+import { createClient } from '@supabase/supabase-js'
+
+// ─── Supabase server client (service role for writes, anon for reads) ───────
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE_KEY
+const supabaseServer = (SUPABASE_URL && SUPABASE_SERVICE_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+  : null
+if (supabaseServer) console.log('[Supabase] Server client initialized (service role)')
+else console.warn('[Supabase] No SUPABASE_SERVICE_ROLE_KEY — SEC reports will use JSON file cache only')
 
 const yf = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] })
 
@@ -600,6 +612,463 @@ app.get('/api/profile', async (req, res) => {
     res.status(500).json({ error: err.message })
   }
 })
+
+// ─── SEC EDGAR: Financial Reports ───────────────────────────────────────────
+const SEC_CACHE_PATH = new URL('./data/sec-reports.json', import.meta.url).pathname
+const SEC_CACHE_TTL = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+// ── Supabase-based cache helpers ──
+async function readSecCacheDb(ticker, formType) {
+  if (!supabaseServer) return []
+  try {
+    const { data, error } = await supabaseServer
+      .from('financial_reports')
+      .select('*')
+      .eq('ticker', ticker.toUpperCase())
+      .eq('report_type', formType)
+      .order('report_date', { ascending: false })
+    if (error) throw error
+    return (data || []).map(r => ({
+      id: r.id, ticker: r.ticker, source: r.source, reportType: r.report_type,
+      periodCurrent: r.period_current, periodPrevious: r.period_previous,
+      reportDate: r.report_date, filedDate: r.filed_date,
+      metrics: r.metrics, diagnosis: r.diagnosis, narrative: r.narrative,
+      narrativeSources: r.narrative_sources || [],
+      audioUrl: r.audio_url || null,
+      fetchedAt: r.fetched_at,
+    }))
+  } catch (err) {
+    console.warn('[SEC DB] Read failed:', err.message)
+    return []
+  }
+}
+
+async function writeSecCacheDb(reports) {
+  if (!supabaseServer || !reports.length) return
+  try {
+    const rows = reports.map(r => ({
+      id: r.id, ticker: r.ticker, source: r.source || 'sec',
+      report_type: r.reportType, period_current: r.periodCurrent,
+      period_previous: r.periodPrevious, report_date: r.reportDate,
+      filed_date: r.filedDate, metrics: r.metrics, diagnosis: r.diagnosis,
+      narrative: r.narrative || null,
+      narrative_sources: r.narrativeSources || null,
+      fetched_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + SEC_CACHE_TTL).toISOString(),
+    }))
+    const { error } = await supabaseServer
+      .from('financial_reports')
+      .upsert(rows, { onConflict: 'id' })
+    if (error) throw error
+    console.log(`[SEC DB] Upserted ${rows.length} reports for ${reports[0].ticker}`)
+  } catch (err) {
+    console.warn('[SEC DB] Write failed:', err.message)
+  }
+}
+
+async function updateNarrativeDb(reportId, narrative, narrativeSources) {
+  if (!supabaseServer || !narrative) return
+  try {
+    const update = { narrative }
+    if (narrativeSources) update.narrative_sources = narrativeSources
+    await supabaseServer
+      .from('financial_reports')
+      .update(update)
+      .eq('id', reportId)
+  } catch (err) {
+    console.warn('[SEC DB] Narrative update failed:', err.message)
+  }
+}
+
+// ── JSON file fallback ──
+function readSecCache() {
+  if (!existsSync(SEC_CACHE_PATH)) return {}
+  try { return JSON.parse(readFileSync(SEC_CACHE_PATH, 'utf-8')) } catch { return {} }
+}
+function writeSecCache(data) {
+  writeFileSync(SEC_CACHE_PATH, JSON.stringify(data, null, 2))
+}
+
+// GET Supabase diagnostic
+app.get('/api/debug/supabase', async (req, res) => {
+  const info = {
+    hasClient: !!supabaseServer,
+    url: SUPABASE_URL ? 'set' : 'missing',
+    serviceKey: SUPABASE_SERVICE_KEY ? `set (${SUPABASE_SERVICE_KEY.length} chars)` : 'missing',
+  }
+  if (supabaseServer) {
+    try {
+      // Try a simple read
+      const { data, error, count } = await supabaseServer
+        .from('financial_reports')
+        .select('id', { count: 'exact', head: true })
+      info.readTest = error ? { error: error.message, code: error.code } : { ok: true, count }
+    } catch (err) { info.readTest = { error: err.message } }
+    try {
+      // Try a write + delete
+      const testId = '__test__'
+      const { error: writeErr } = await supabaseServer
+        .from('financial_reports')
+        .upsert({
+          id: testId, ticker: 'TEST', source: 'test', report_type: 'test',
+          period_current: 'test', period_previous: 'test',
+          metrics: {}, diagnosis: {},
+        }, { onConflict: 'id' })
+      if (writeErr) {
+        info.writeTest = { error: writeErr.message, code: writeErr.code, details: writeErr.details, hint: writeErr.hint }
+      } else {
+        info.writeTest = { ok: true }
+        await supabaseServer.from('financial_reports').delete().eq('id', testId)
+      }
+    } catch (err) { info.writeTest = { error: err.message } }
+  }
+  res.json(info)
+})
+
+// GET check status of all Gemini models
+app.get('/api/llm/status', async (req, res) => {
+  const geminiKey = req.headers['x-gemini-key'] || ''
+  if (!geminiKey) return res.json({ models: [], error: 'No API key' })
+  try {
+    const models = await checkModelsStatus(geminiKey)
+    res.json({ models })
+  } catch (err) {
+    res.json({ models: [], error: err.message })
+  }
+})
+
+// POST test Gemini API key
+app.post('/api/llm/test-key', async (req, res) => {
+  const geminiKey = req.headers['x-gemini-key'] || ''
+  if (!geminiKey) return res.json({ ok: false, error: 'No API key provided' })
+  const result = await testApiKey(geminiKey)
+  res.json(result)
+})
+
+// POST regenerate narrative for a specific report (with grounding)
+app.post('/api/sec/regenerate-narrative', async (req, res) => {
+  try {
+    const { reportId } = req.body
+    const geminiKey = req.headers['x-gemini-key'] || ''
+    if (!reportId) return res.status(400).json({ error: 'Falta reportId' })
+    if (!geminiKey) return res.status(400).json({ error: 'Falta API key' })
+
+    // Read the report from Supabase
+    let report = null
+    if (supabaseServer) {
+      const { data } = await supabaseServer
+        .from('financial_reports')
+        .select('*')
+        .eq('id', reportId)
+        .single()
+      if (data) {
+        report = {
+          id: data.id, ticker: data.ticker, reportType: data.report_type,
+          periodCurrent: data.period_current, periodPrevious: data.period_previous,
+          reportDate: data.report_date, filedDate: data.filed_date,
+          metrics: data.metrics, diagnosis: data.diagnosis,
+        }
+      }
+    }
+    if (!report) return res.status(404).json({ error: 'Report not found' })
+
+    const result = await generateNarrative(report.ticker, report, geminiKey)
+    if (result?.text) {
+      await updateNarrativeDb(reportId, result.text, result.sources)
+      // Also update JSON file cache
+      const fileCache = readSecCache()
+      for (const key of Object.keys(fileCache)) {
+        const cached = fileCache[key]
+        if (cached?.reports) {
+          const r = cached.reports.find(r => r.id === reportId)
+          if (r) { r.narrative = result.text; r.narrativeSources = result.sources || []; break }
+        }
+      }
+      writeSecCache(fileCache)
+      res.json({ ok: true, narrative: result.text, narrativeSources: result.sources || [] })
+    } else {
+      res.json({ ok: false, error: 'Gemini returned empty response' })
+    }
+  } catch (err) {
+    console.error('Error /api/sec/regenerate-narrative:', err.message)
+    res.json({ ok: false, error: err.message })
+  }
+})
+
+// POST generate audio narration for a report and upload to Supabase Storage
+app.post('/api/sec/generate-audio', async (req, res) => {
+  try {
+    const { reportId } = req.body
+    const geminiKey = req.headers['x-gemini-key'] || ''
+    if (!reportId) return res.status(400).json({ error: 'Falta reportId' })
+    if (!geminiKey) return res.status(400).json({ error: 'Falta API key' })
+    if (!supabaseServer) return res.status(500).json({ error: 'Supabase no configurado' })
+
+    // Read the report from Supabase to get the narrative
+    // Use select('*') to avoid errors if audio_url column doesn't exist yet
+    const { data: report, error: readErr } = await supabaseServer
+      .from('financial_reports')
+      .select('*')
+      .eq('id', reportId)
+      .single()
+
+    if (readErr) {
+      console.warn('[TTS] Supabase read error:', readErr.message)
+      return res.status(500).json({ error: `Error leyendo informe: ${readErr.message}` })
+    }
+    if (!report) return res.status(404).json({ error: 'Informe no encontrado' })
+    if (!report.narrative) return res.status(400).json({ error: 'El informe no tiene resumen — genera primero el resumen ejecutivo' })
+
+    // If audio already exists, return the existing URL
+    if (report.audio_url) {
+      console.log(`[TTS] Audio already exists for ${reportId}: ${report.audio_url}`)
+      return res.json({ ok: true, audioUrl: report.audio_url, cached: true })
+    }
+
+    // Generate audio via Gemini TTS
+    const wavBuffer = await generateAudio(report.narrative, geminiKey)
+    if (!wavBuffer) return res.json({ ok: false, error: 'Gemini TTS no devolvió audio' })
+
+    // Upload to Supabase Storage bucket 'reports'
+    const safeTicker = report.ticker.replace(/[^a-zA-Z0-9]/g, '_')
+    const safePeriod = report.period_current.replace(/[^a-zA-Z0-9]/g, '_')
+    const fileName = `${safeTicker}/${report.report_type}_${safePeriod}.wav`
+
+    console.log(`[TTS] Uploading ${fileName} to Supabase Storage (${(wavBuffer.length / 1024).toFixed(0)} KB)...`)
+
+    const { data: uploadData, error: uploadErr } = await supabaseServer
+      .storage
+      .from('reports')
+      .upload(fileName, wavBuffer, {
+        contentType: 'audio/wav',
+        upsert: true,
+      })
+
+    if (uploadErr) {
+      console.error('[TTS] Upload failed:', uploadErr.message)
+      return res.json({ ok: false, error: `Error al subir audio: ${uploadErr.message}` })
+    }
+
+    // Get public URL
+    const { data: urlData } = supabaseServer
+      .storage
+      .from('reports')
+      .getPublicUrl(fileName)
+
+    const audioUrl = urlData?.publicUrl || ''
+    console.log(`[TTS] ✓ Uploaded: ${audioUrl}`)
+
+    // Save audio URL in the report record
+    await supabaseServer
+      .from('financial_reports')
+      .update({ audio_url: audioUrl })
+      .eq('id', reportId)
+
+    res.json({ ok: true, audioUrl })
+  } catch (err) {
+    console.error('Error /api/sec/generate-audio:', err.message)
+    res.json({ ok: false, error: err.message })
+  }
+})
+
+// GET list of reports for a ticker
+app.get('/api/sec/reports', async (req, res) => {
+  try {
+    const { ticker, type } = req.query
+    const geminiKey = req.headers['x-gemini-key'] || ''
+    if (!ticker) return res.status(400).json({ error: 'Falta el parámetro ticker' })
+    if (!isUsTicker(ticker)) return res.json({ reports: [], notUs: true })
+
+    const formType = (type || '10-Q').toUpperCase()
+    const tickerUp = ticker.toUpperCase()
+
+    // 1. Try Supabase cache first, then JSON file
+    let cachedReports = await readSecCacheDb(tickerUp, formType)
+    let cacheSource = 'supabase'
+    if (!cachedReports.length) {
+      // Fallback to JSON file
+      const fileCache = readSecCache()
+      const cacheKey = `${tickerUp}_${formType}`
+      const fileCached = fileCache[cacheKey]
+      if (fileCached && Array.isArray(fileCached.reports)) {
+        cachedReports = fileCached.reports
+        cacheSource = 'file'
+      }
+    }
+
+    // Check if cache is fresh
+    const isFresh = cachedReports.length > 0 &&
+      cachedReports[0].fetchedAt &&
+      (Date.now() - new Date(cachedReports[0].fetchedAt).getTime()) < SEC_CACHE_TTL
+
+    if (isFresh) {
+      console.log(`[SEC] Cache hit (${cacheSource}): ${tickerUp} ${formType} (${cachedReports.length} reports)`)
+      // If from file cache, sync to Supabase in background
+      if (cacheSource === 'file') writeSecCacheDb(cachedReports).catch(() => {})
+      return res.json({
+        ticker: tickerUp, formType, reports: cachedReports,
+        hasNarrative: cachedReports.some(r => r.narrative),
+      })
+    }
+
+    // 2. Fetch fresh reports from SEC EDGAR
+    console.log(`[SEC] Fetching ${tickerUp} ${formType}...`)
+    const reports = await fetchReportList(ticker, formType)
+
+    // Preserve existing narratives from cache
+    for (const r of reports) {
+      const prev = cachedReports.find(cr => cr.id === r.id)
+      if (prev?.narrative) {
+        r.narrative = prev.narrative
+        if (prev.narrativeSources) r.narrativeSources = prev.narrativeSources
+      }
+    }
+
+    // Narratives are generated on-demand via /api/sec/regenerate-narrative
+    // (no batch generation here — avoids rate limiting)
+
+    // 3. Save to Supabase + JSON file
+    await writeSecCacheDb(reports)
+    const fileCache = readSecCache()
+    fileCache[`${tickerUp}_${formType}`] = {
+      ticker: tickerUp, formType, reports,
+      fetchedAt: new Date().toISOString(),
+      hasNarrative: reports.some(r => r.narrative),
+    }
+    writeSecCache(fileCache)
+
+    res.json({
+      ticker: tickerUp, formType, reports,
+      fetchedAt: new Date().toISOString(),
+      hasNarrative: reports.some(r => r.narrative),
+    })
+  } catch (err) {
+    console.error('Error /api/sec/reports:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET check for new filings across all portfolio US tickers
+app.get('/api/sec/check-new', async (req, res) => {
+  try {
+    const db = readDB()
+    const allAssets = [...(db.actives || []), ...(db.watchlist || [])]
+    const usTickers = allAssets.filter(a => isUsTicker(a.ticker)).map(a => a.ticker.toUpperCase())
+    const newFilings = []
+
+    for (const ticker of usTickers) {
+      try {
+        for (const formType of ['10-Q', '10-K']) {
+          const latestDate = await getLatestFilingDate(ticker, formType)
+          if (!latestDate) continue
+
+          // Check against Supabase first, then file cache
+          let cachedLatest = null
+          const dbReports = await readSecCacheDb(ticker, formType)
+          if (dbReports.length) {
+            cachedLatest = dbReports[0].filedDate
+          } else {
+            const fileCache = readSecCache()
+            cachedLatest = fileCache[`${ticker}_${formType}`]?.reports?.[0]?.filedDate
+          }
+
+          if (latestDate !== cachedLatest) {
+            newFilings.push({ ticker, formType, filedDate: latestDate, isNew: true })
+          }
+        }
+        await new Promise(r => setTimeout(r, 200))
+      } catch (err) {
+        console.warn(`[SEC] Check failed for ${ticker}:`, err.message)
+      }
+    }
+
+    res.json({ checked: usTickers.length, newFilings })
+  } catch (err) {
+    console.error('Error /api/sec/check-new:', err.message)
+    res.json({ checked: 0, newFilings: [] })
+  }
+})
+
+// ── Background scheduler: check for new SEC filings every 6 hours ──
+let secCheckInterval = null
+function startSecScheduler() {
+  const SIX_HOURS = 6 * 60 * 60 * 1000
+
+  async function fetchAndCache(ticker, formType) {
+    const reports = await fetchReportList(ticker, formType)
+    // Preserve existing narratives
+    const existing = await readSecCacheDb(ticker, formType)
+    for (const r of reports) {
+      const prev = existing.find(cr => cr.id === r.id)
+      if (prev?.narrative) {
+        r.narrative = prev.narrative
+        if (prev.narrativeSources) r.narrativeSources = prev.narrativeSources
+      }
+    }
+    // Write to both Supabase and JSON file
+    await writeSecCacheDb(reports)
+    const fileCache = readSecCache()
+    fileCache[`${ticker}_${formType}`] = {
+      ticker, formType, reports,
+      fetchedAt: new Date().toISOString(),
+      hasNarrative: reports.some(r => r.narrative),
+    }
+    writeSecCache(fileCache)
+    return reports
+  }
+
+  // Initial check 30 seconds after startup
+  setTimeout(async () => {
+    console.log('[SEC Scheduler] Running initial check...')
+    try {
+      const db = readDB()
+      const allAssets = [...(db.actives || []), ...(db.watchlist || [])]
+      const usTickers = allAssets.filter(a => isUsTicker(a.ticker)).map(a => a.ticker.toUpperCase())
+      if (usTickers.length === 0) return
+
+      for (const ticker of usTickers) {
+        for (const formType of ['10-Q', '10-K']) {
+          // Check if we have fresh data already
+          const cached = await readSecCacheDb(ticker, formType)
+          if (cached.length && cached[0].fetchedAt && (Date.now() - new Date(cached[0].fetchedAt).getTime()) < SEC_CACHE_TTL) continue
+          try {
+            console.log(`[SEC Scheduler] Fetching ${ticker} ${formType}...`)
+            await fetchAndCache(ticker, formType)
+          } catch (err) { console.warn(`[SEC Scheduler] ${ticker} ${formType}: ${err.message}`) }
+          await new Promise(r => setTimeout(r, 500))
+        }
+      }
+      console.log('[SEC Scheduler] Initial check done.')
+    } catch (err) { console.error('[SEC Scheduler] Error:', err.message) }
+  }, 30_000)
+
+  // Repeat every 6 hours
+  secCheckInterval = setInterval(async () => {
+    console.log('[SEC Scheduler] Periodic check...')
+    try {
+      const db = readDB()
+      const allAssets = [...(db.actives || []), ...(db.watchlist || [])]
+      const usTickers = allAssets.filter(a => isUsTicker(a.ticker)).map(a => a.ticker.toUpperCase())
+      for (const ticker of usTickers) {
+        for (const formType of ['10-Q', '10-K']) {
+          try {
+            const latestDate = await getLatestFilingDate(ticker, formType)
+            const cached = await readSecCacheDb(ticker, formType)
+            const cachedLatest = cached[0]?.filedDate
+            if (latestDate && latestDate !== cachedLatest) {
+              console.log(`[SEC Scheduler] New ${formType} for ${ticker} (${latestDate})`)
+              await fetchAndCache(ticker, formType)
+            }
+          } catch { /* skip ticker */ }
+          await new Promise(r => setTimeout(r, 300))
+        }
+      }
+    } catch (err) { console.error('[SEC Scheduler] Error:', err.message) }
+  }, SIX_HOURS)
+}
+
+// Start scheduler when server boots
+startSecScheduler()
 
 // ─── En producción, servir el frontend compilado ─────────────────────────────
 import { fileURLToPath } from 'url'

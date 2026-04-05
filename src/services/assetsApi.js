@@ -226,6 +226,8 @@ export async function getCachedAnalysis(ticker) {
             indicators: data.indicators,
             projection: data.projection,
             dividends: data.dividends,
+            cashFlow: data.cash_flow || null,
+            fundamentals: data.fundamentals || null,
           },
           profile: data.profile,
         }
@@ -264,6 +266,8 @@ export async function getAllCachedAnalyses() {
               indicators: row.indicators,
               projection: row.projection,
               dividends: row.dividends,
+              cashFlow: row.cash_flow || null,
+              fundamentals: row.fundamentals || null,
             },
             profile: row.profile,
           }
@@ -304,6 +308,8 @@ export async function saveCachedAnalysis(ticker, years, analysisData, profile) {
         indicators: analysisData.indicators || null,
         projection: analysisData.projection || null,
         dividends: analysisData.dividends || null,
+        cash_flow: analysisData.cashFlow || null,
+        fundamentals: analysisData.fundamentals || null,
         profile: profile || null,
       }, { onConflict: 'user_id,ticker' })
     } catch (err) {

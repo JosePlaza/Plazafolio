@@ -25,6 +25,7 @@
     "radix-vue": "^1.9.17",
     "tailwind-merge": "^3.5.0",
     "vue": "^3.5.30",
+    "vue-router": "^4.6.4",
     "yahoo-finance2": "^3.14.0"
   },
   "devDependencies": {

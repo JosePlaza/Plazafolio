@@ -19,7 +19,9 @@ export function usePortfolio(actives, analyses, transactions) {
       const indicators = cached?.data?.indicators || null
       const projection = cached?.data?.projection || null
       const dividends = cached?.data?.dividends || []
-      const scoring = indicators ? computeBuyScore(indicators, projection, dividends) : null
+      const cashFlow = cached?.data?.cashFlow || null
+      const fundamentals = cached?.data?.fundamentals || null
+      const scoring = indicators ? computeBuyScore(indicators, projection, dividends, cashFlow, fundamentals) : null
 
       const nativeCur = nativeCurrencyOf(asset.ticker)
       const sym = symbolFor(asset.ticker)
