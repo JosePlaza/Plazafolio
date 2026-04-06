@@ -33,7 +33,7 @@ function onBack() {
 </script>
 
 <template>
-  <main class="dot-pattern flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6" style="max-height: calc(100dvh - 3.5rem - env(safe-area-inset-top, 0px))">
+  <main class="dot-pattern flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-navbar" style="max-height: calc(100dvh - 3.5rem - env(safe-area-inset-top, 0px))">
     <PortfolioDetail
       v-if="app.portfolioDetailAsset.value"
       :asset="app.portfolioDetailAsset.value"

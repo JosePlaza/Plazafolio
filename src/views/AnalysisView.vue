@@ -55,7 +55,7 @@ const freshLabels = computed(() => {
 </script>
 
 <template>
-  <main class="dot-pattern flex-1 lg:mr-72 overflow-y-auto p-3 sm:p-5 space-y-4" style="max-height: calc(100dvh - 3.5rem - env(safe-area-inset-top, 0px))">
+  <main class="dot-pattern flex-1 lg:mr-72 overflow-y-auto p-3 sm:p-5 space-y-4 pb-navbar" style="max-height: calc(100dvh - 3.5rem - env(safe-area-inset-top, 0px))">
     <SkeletonLoader v-if="app.loading.value" />
 
     <div v-if="app.error.value && !app.loading.value" class="glass-card p-4" style="border-color: rgba(239, 68, 68, 0.2);">

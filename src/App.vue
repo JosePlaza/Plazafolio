@@ -6,6 +6,7 @@ import { useAppState } from '@/composables/useAppState'
 import AuthView from '@/components/AuthView.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import AppSidebar from '@/components/AppSidebar.vue'
+import BottomNavbar from '@/components/BottomNavbar.vue'
 import AddAssetModal from '@/components/AddAssetModal.vue'
 
 const { user, loading: authLoading, init: initAuth, signOut } = useAuth()
@@ -22,6 +23,8 @@ const activeTab = computed(() => route.meta?.tab || 'analysis')
 // Navigation helpers
 function onTabChange(tab) {
   app.portfolioDetailAsset.value = null
+  // Close sidebar when navigating via bottom navbar
+  app.sidebarOpen.value = false
   router.push(`/${tab}`)
 }
 
@@ -100,6 +103,12 @@ onMounted(async () => {
         />
       </div>
     </Transition>
+
+    <!-- Bottom navbar (mobile only) -->
+    <BottomNavbar
+      :active-tab="activeTab"
+      @update:active-tab="onTabChange"
+    />
 
     <!-- Add Asset Modal -->
     <AddAssetModal

@@ -105,15 +105,15 @@ function onAlertClick(alert) {
 </script>
 
 <template>
-  <header class="glass-header fixed top-0 left-0 right-0 z-40 flex items-end px-3 sm:px-5 pb-2">
+  <header class="glass-header fixed top-0 left-0 right-0 z-40 flex items-center lg:items-end px-3 sm:px-5 pb-0 lg:pb-2">
     <!-- Logo -->
     <div class="flex items-center gap-2 sm:gap-3">
       <img src="/plazafolio.svg" alt="Plazafolio" class="w-7 h-7 sm:w-8 sm:h-8" />
       <span class="text-foreground font-semibold text-sm tracking-wide hidden sm:inline">Plazafolio</span>
     </div>
 
-    <!-- Nav tabs — scrollable on mobile -->
-    <nav class="header-tabs-nav flex items-center gap-0.5 sm:gap-1 ml-2 sm:ml-8 overflow-x-auto scrollbar-hide">
+    <!-- Nav tabs — desktop only (mobile uses BottomNavbar) -->
+    <nav class="hidden lg:flex items-center gap-1 ml-8">
       <button
         v-for="tab in tabs"
         :key="tab.id"

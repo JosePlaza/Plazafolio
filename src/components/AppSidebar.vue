@@ -203,13 +203,13 @@ function getIndicatorTop(list, idx) { return idx * 44 + 'px' }
   <Transition name="sidebar-backdrop">
     <div
       v-if="open"
-      class="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm lg:hidden"
+      class="fixed inset-0 z-[45] bg-black/50 backdrop-blur-sm lg:hidden"
       @click="emit('close')"
     />
   </Transition>
 
   <aside
-    class="glass-sidebar w-72 fixed right-0 bottom-0 z-30 flex flex-col transition-transform duration-300 lg:translate-x-0"
+    class="glass-sidebar w-72 fixed right-0 bottom-0 z-[45] flex flex-col transition-transform duration-300 lg:translate-x-0"
     style="top: calc(3.5rem + env(safe-area-inset-top, 0px));"
     :class="open ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'"
   >

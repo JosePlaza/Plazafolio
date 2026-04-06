@@ -72,7 +72,7 @@ function masked(key) {
 </script>
 
 <template>
-  <div class="max-w-lg mx-auto py-6 px-4">
+  <div class="max-w-lg mx-auto py-6 px-4 pb-navbar">
     <!-- Header -->
     <div class="flex items-center gap-3 mb-8">
       <button
