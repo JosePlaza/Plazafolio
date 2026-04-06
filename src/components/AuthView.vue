@@ -60,7 +60,7 @@ function toggleMode() {
     <div class="w-full max-w-sm relative z-10">
       <!-- Logo + Title -->
       <div class="flex flex-col items-center mb-8">
-        <img src="/plaza.svg" alt="Plazafolio" class="w-14 h-14 mb-3" />
+        <img src="/plazafolio.svg" alt="Plazafolio" class="w-14 h-14 mb-3" />
         <h1 class="text-xl font-bold text-foreground tracking-tight">Plazafolio</h1>
         <p class="text-muted-foreground text-xs mt-1">Análisis con el método Geraldine Weiss</p>
       </div>

@@ -108,7 +108,7 @@ function onAlertClick(alert) {
   <header class="glass-header fixed top-0 left-0 right-0 z-40 flex items-end px-3 sm:px-5 pb-2">
     <!-- Logo -->
     <div class="flex items-center gap-2 sm:gap-3">
-      <img src="/plaza.svg" alt="Plazafolio" class="w-7 h-7 sm:w-8 sm:h-8" />
+      <img src="/plazafolio.svg" alt="Plazafolio" class="w-7 h-7 sm:w-8 sm:h-8" />
       <span class="text-foreground font-semibold text-sm tracking-wide hidden sm:inline">Plazafolio</span>
     </div>
 
