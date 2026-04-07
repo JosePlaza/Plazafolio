@@ -7,6 +7,7 @@ import AuthView from '@/components/AuthView.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import BottomNavbar from '@/components/BottomNavbar.vue'
+import FloatingAudioPlayer from '@/components/FloatingAudioPlayer.vue'
 import AddAssetModal from '@/components/AddAssetModal.vue'
 
 const { user, loading: authLoading, init: initAuth, signOut } = useAuth()
@@ -104,9 +105,13 @@ onMounted(async () => {
       </div>
     </Transition>
 
+    <!-- Floating audio player (persists across views) -->
+    <FloatingAudioPlayer :sidebar-open="app.sidebarOpen.value" />
+
     <!-- Bottom navbar (mobile only) -->
     <BottomNavbar
       :active-tab="activeTab"
+      :sidebar-open="app.sidebarOpen.value"
       @update:active-tab="onTabChange"
     />
 

@@ -1,9 +1,11 @@
 <script setup>
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch } from 'vue'
 import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
 import { useSettings } from '@/composables/useSettings'
+import { useAudioPlayer } from '@/composables/useAudioPlayer'
 
 const { geminiApiKey } = useSettings()
+const audio = useAudioPlayer()
 
 const props = defineProps({
   report: { type: Object, required: true },
@@ -14,62 +16,24 @@ const props = defineProps({
 
 const emit = defineEmits(['back', 'regenerate', 'generate-audio'])
 
-// ── Audio player state ──
-const audioEl = ref(null)
-const isPlaying = ref(false)
-const audioProgress = ref(0)
-const audioDuration = ref(0)
-let progressInterval = null
+// ── Audio: delegate to global composable ──
+const isPlaying = computed(() => audio.playingReportId.value === props.report.id && audio.isPlaying.value)
+const audioProgress = computed(() => audio.playingReportId.value === props.report.id ? audio.currentProgress.value : 0)
+const audioDuration = computed(() => audio.playingReportId.value === props.report.id ? audio.currentDuration.value : 0)
 
 function toggleAudio() {
-  if (!audioEl.value) return
-  if (isPlaying.value) {
-    audioEl.value.pause()
-  } else {
-    audioEl.value.play()
-  }
-}
-
-function onAudioPlay() {
-  isPlaying.value = true
-  progressInterval = setInterval(() => {
-    if (audioEl.value) {
-      audioProgress.value = audioEl.value.currentTime
-      audioDuration.value = audioEl.value.duration || 0
-    }
-  }, 250)
-}
-
-function onAudioPause() {
-  isPlaying.value = false
-  clearInterval(progressInterval)
-}
-
-function onAudioEnded() {
-  isPlaying.value = false
-  audioProgress.value = 0
-  clearInterval(progressInterval)
+  audio.play(props.report)
 }
 
 function seekAudio(e) {
-  if (!audioEl.value || !audioDuration.value) return
   const rect = e.currentTarget.getBoundingClientRect()
   const pct = (e.clientX - rect.left) / rect.width
-  audioEl.value.currentTime = pct * audioDuration.value
+  audio.seekTo(Math.max(0, Math.min(1, pct)))
 }
 
-function fmtTime(s) {
-  if (!s || isNaN(s)) return '0:00'
-  const m = Math.floor(s / 60)
-  const sec = Math.floor(s % 60)
-  return `${m}:${sec.toString().padStart(2, '0')}`
-}
+function fmtTime(s) { return audio.fmtTime(s) }
 
-// Clean up on unmount
-onBeforeUnmount(() => {
-  clearInterval(progressInterval)
-  if (audioEl.value) { audioEl.value.pause(); audioEl.value = null }
-})
+// No cleanup needed — audio persists globally
 
 function fmtVal(val, format) {
   if (val == null || isNaN(val)) return '-'
@@ -104,17 +68,6 @@ const signalCounts = computed(() => {
 
 <template>
   <div class="space-y-4">
-    <!-- Hidden audio element -->
-    <audio
-      v-if="report.audioUrl"
-      ref="audioEl"
-      :src="report.audioUrl"
-      preload="metadata"
-      @play="onAudioPlay"
-      @pause="onAudioPause"
-      @ended="onAudioEnded"
-    />
-
     <!-- Back header -->
     <div class="flex items-center gap-3 mb-2">
       <button

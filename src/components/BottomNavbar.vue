@@ -1,6 +1,7 @@
 <script setup>
 const props = defineProps({
   activeTab: { type: String, default: 'analysis' },
+  sidebarOpen: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:activeTab'])
@@ -34,19 +35,30 @@ const tabs = [
 </script>
 
 <template>
-  <nav class="bottom-navbar">
-    <button
-      v-for="tab in tabs"
-      :key="tab.id"
-      class="bottom-nav-item"
-      :class="{ active: activeTab === tab.id }"
-      @click="emit('update:activeTab', tab.id)"
-    >
-      <span class="bottom-nav-icon" v-html="tab.icon"></span>
-      <Transition name="label-slide">
-        <span v-if="activeTab === tab.id" class="bottom-nav-label">{{ tab.label }}</span>
-      </Transition>
-    </button>
+  <nav class="bottom-navbar" :class="{ 'navbar-collapsed': sidebarOpen }">
+    <template v-if="sidebarOpen">
+      <!-- Collapsed: only show active tab icon -->
+      <button
+        class="bottom-nav-item active"
+        @click="emit('update:activeTab', activeTab)"
+      >
+        <span class="bottom-nav-icon" v-html="tabs.find(t => t.id === activeTab)?.icon"></span>
+      </button>
+    </template>
+    <template v-else>
+      <button
+        v-for="tab in tabs"
+        :key="tab.id"
+        class="bottom-nav-item"
+        :class="{ active: activeTab === tab.id }"
+        @click="emit('update:activeTab', tab.id)"
+      >
+        <span class="bottom-nav-icon" v-html="tab.icon"></span>
+        <Transition name="label-slide">
+          <span v-if="activeTab === tab.id" class="bottom-nav-label">{{ tab.label }}</span>
+        </Transition>
+      </button>
+    </template>
   </nav>
 </template>
 
@@ -67,12 +79,27 @@ const tabs = [
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.04) inset;
+  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              right 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.3s ease,
+              transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @media (min-width: 1024px) {
   .bottom-navbar {
     display: none;
   }
+}
+
+/* Collapsed state when sidebar is open — single icon pill on the left */
+.bottom-navbar.navbar-collapsed {
+  left: 12px;
+  right: auto;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  justify-content: center;
 }
 
 .bottom-nav-item {
@@ -104,7 +131,8 @@ const tabs = [
   width: 32px;
   height: 32px;
   border-radius: 10px;
-  transition: background 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: background 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+              width 0.3s ease, height 0.3s ease;
 }
 
 .bottom-nav-item.active .bottom-nav-icon {

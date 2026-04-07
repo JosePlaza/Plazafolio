@@ -4,6 +4,7 @@ import cors from 'cors'
 import YahooFinance from 'yahoo-finance2'
 import { readFileSync, writeFileSync, existsSync, statSync } from 'fs'
 import { fetchReportList, getLatestFilingDate, isUsTicker } from './sec-edgar.js'
+import { fetchReportList as fetchEsefReportList, isEuropeanTicker } from './esef-reports.js'
 import { generateNarrative, generateAudio, testApiKey, checkModelsStatus } from './llm-provider.js'
 import { createClient } from '@supabase/supabase-js'
 
@@ -653,6 +654,7 @@ async function writeSecCacheDb(reports) {
       filed_date: r.filedDate, metrics: r.metrics, diagnosis: r.diagnosis,
       narrative: r.narrative || null,
       narrative_sources: r.narrativeSources || null,
+      audio_url: r.audioUrl || null,
       fetched_at: new Date().toISOString(),
       expires_at: new Date(Date.now() + SEC_CACHE_TTL).toISOString(),
     }))
@@ -663,6 +665,44 @@ async function writeSecCacheDb(reports) {
     console.log(`[SEC DB] Upserted ${rows.length} reports for ${reports[0].ticker}`)
   } catch (err) {
     console.warn('[SEC DB] Write failed:', err.message)
+  }
+}
+
+/**
+ * Repair audio_url for reports that have audio in Storage but missing DB audio_url.
+ * This can happen if the DB update failed after uploading to Storage.
+ * Mutates the reports array in-place and updates DB in background.
+ */
+async function repairAudioUrls(reports) {
+  if (!supabaseServer || !reports.length) return
+  const toRepair = reports.filter(r => !r.audioUrl && r.ticker && r.reportType && r.periodCurrent)
+  if (!toRepair.length) return
+
+  for (const r of toRepair) {
+    try {
+      const safeTicker = r.ticker.replace(/[^a-zA-Z0-9]/g, '_')
+      const safePeriod = r.periodCurrent.replace(/[^a-zA-Z0-9]/g, '_')
+      const expectedFile = `${r.reportType}_${safePeriod}.wav`
+
+      const { data: files } = await supabaseServer.storage
+        .from('reports')
+        .list(safeTicker, { search: expectedFile })
+
+      if (files && files.some(f => f.name === expectedFile)) {
+        const filePath = `${safeTicker}/${expectedFile}`
+        const { data: urlData } = supabaseServer.storage.from('reports').getPublicUrl(filePath)
+        const audioUrl = urlData?.publicUrl || ''
+        if (audioUrl) {
+          r.audioUrl = audioUrl
+          console.log(`[TTS] Repaired audio_url for ${r.id}: ${audioUrl}`)
+          // Update DB in background
+          supabaseServer.from('financial_reports')
+            .update({ audio_url: audioUrl })
+            .eq('id', r.id)
+            .then(({ error }) => { if (error) console.warn(`[TTS] Repair DB update failed for ${r.id}:`, error.message) })
+        }
+      }
+    } catch (e) { /* ignore individual failures */ }
   }
 }
 
@@ -748,7 +788,7 @@ app.post('/api/llm/test-key', async (req, res) => {
 // POST regenerate narrative for a specific report (with grounding)
 app.post('/api/sec/regenerate-narrative', async (req, res) => {
   try {
-    const { reportId } = req.body
+    const { reportId, reportData } = req.body
     const geminiKey = req.headers['x-gemini-key'] || ''
     if (!reportId) return res.status(400).json({ error: 'Falta reportId' })
     if (!geminiKey) return res.status(400).json({ error: 'Falta API key' })
@@ -770,11 +810,45 @@ app.post('/api/sec/regenerate-narrative', async (req, res) => {
         }
       }
     }
+
+    // Fallback: use report data sent by the client (report may not be in Supabase yet)
+    let reportMissingFromDb = false
+    if (!report && reportData) {
+      report = {
+        id: reportId,
+        ticker: reportData.ticker,
+        reportType: reportData.reportType,
+        periodCurrent: reportData.periodCurrent,
+        periodPrevious: reportData.periodPrevious,
+        reportDate: reportData.reportDate,
+        filedDate: reportData.filedDate,
+        metrics: reportData.metrics,
+        diagnosis: reportData.diagnosis,
+      }
+      reportMissingFromDb = true
+      console.log(`[SEC] Report ${reportId} not in DB — using client-provided data`)
+    }
     if (!report) return res.status(404).json({ error: 'Report not found' })
 
     const result = await generateNarrative(report.ticker, report, geminiKey)
     if (result?.text) {
-      await updateNarrativeDb(reportId, result.text, result.sources)
+      // If report was missing from DB, upsert the full record so audio generation can find it
+      if (reportMissingFromDb && supabaseServer) {
+        const row = {
+          id: reportId, ticker: report.ticker, source: report.source || (reportId.includes('ESEF') ? 'esef' : 'sec'),
+          report_type: report.reportType, period_current: report.periodCurrent,
+          period_previous: report.periodPrevious, report_date: report.reportDate,
+          filed_date: report.filedDate, metrics: report.metrics, diagnosis: report.diagnosis,
+          narrative: result.text, narrative_sources: result.sources || null,
+          fetched_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 7 * 24 * 3600_000).toISOString(),
+        }
+        const { error: uErr } = await supabaseServer.from('financial_reports').upsert([row], { onConflict: 'id' })
+        if (uErr) console.warn('[SEC] Upsert missing report failed:', uErr.message)
+        else console.log(`[SEC] Upserted missing report ${reportId} with narrative`)
+      } else {
+        await updateNarrativeDb(reportId, result.text, result.sources)
+      }
       // Also update JSON file cache
       const fileCache = readSecCache()
       for (const key of Object.keys(fileCache)) {
@@ -819,21 +893,40 @@ app.post('/api/sec/generate-audio', async (req, res) => {
     if (!report) return res.status(404).json({ error: 'Informe no encontrado' })
     if (!report.narrative) return res.status(400).json({ error: 'El informe no tiene resumen — genera primero el resumen ejecutivo' })
 
-    // If audio already exists, return the existing URL
+    // If audio already exists in DB, return the existing URL
     if (report.audio_url) {
-      console.log(`[TTS] Audio already exists for ${reportId}: ${report.audio_url}`)
+      console.log(`[TTS] Audio already exists in DB for ${reportId}: ${report.audio_url}`)
       return res.json({ ok: true, audioUrl: report.audio_url, cached: true })
     }
+
+    // DB has no audio_url — but file might already exist in Storage (e.g. DB update failed before)
+    const safeTicker = report.ticker.replace(/[^a-zA-Z0-9]/g, '_')
+    const safePeriod = report.period_current.replace(/[^a-zA-Z0-9]/g, '_')
+    const fileName = `${safeTicker}/${report.report_type}_${safePeriod}.wav`
+
+    try {
+      const { data: existingFile } = await supabaseServer
+        .storage
+        .from('reports')
+        .list(safeTicker, { search: `${report.report_type}_${safePeriod}.wav` })
+
+      if (existingFile && existingFile.length > 0) {
+        // File exists in Storage — recover the URL and save to DB
+        const { data: urlData } = supabaseServer.storage.from('reports').getPublicUrl(fileName)
+        const recoveredUrl = urlData?.publicUrl || ''
+        if (recoveredUrl) {
+          console.log(`[TTS] Recovered audio from Storage for ${reportId}: ${recoveredUrl}`)
+          await supabaseServer.from('financial_reports').update({ audio_url: recoveredUrl }).eq('id', reportId)
+          return res.json({ ok: true, audioUrl: recoveredUrl, cached: true })
+        }
+      }
+    } catch (e) { console.warn('[TTS] Storage check failed:', e.message) }
 
     // Generate audio via Gemini TTS
     const wavBuffer = await generateAudio(report.narrative, geminiKey)
     if (!wavBuffer) return res.json({ ok: false, error: 'Gemini TTS no devolvió audio' })
 
-    // Upload to Supabase Storage bucket 'reports'
-    const safeTicker = report.ticker.replace(/[^a-zA-Z0-9]/g, '_')
-    const safePeriod = report.period_current.replace(/[^a-zA-Z0-9]/g, '_')
-    const fileName = `${safeTicker}/${report.report_type}_${safePeriod}.wav`
-
+    // Upload to Supabase Storage bucket 'reports' (safeTicker/safePeriod/fileName defined above)
     console.log(`[TTS] Uploading ${fileName} to Supabase Storage (${(wavBuffer.length / 1024).toFixed(0)} KB)...`)
 
     const { data: uploadData, error: uploadErr } = await supabaseServer
@@ -859,10 +952,11 @@ app.post('/api/sec/generate-audio', async (req, res) => {
     console.log(`[TTS] ✓ Uploaded: ${audioUrl}`)
 
     // Save audio URL in the report record
-    await supabaseServer
+    const { error: updateErr } = await supabaseServer
       .from('financial_reports')
       .update({ audio_url: audioUrl })
       .eq('id', reportId)
+    if (updateErr) console.warn('[TTS] Failed to save audio_url to DB:', updateErr.message)
 
     res.json({ ok: true, audioUrl })
   } catch (err) {
@@ -905,6 +999,8 @@ app.get('/api/sec/reports', async (req, res) => {
       console.log(`[SEC] Cache hit (${cacheSource}): ${tickerUp} ${formType} (${cachedReports.length} reports)`)
       // If from file cache, sync to Supabase in background
       if (cacheSource === 'file') writeSecCacheDb(cachedReports).catch(() => {})
+      // Repair audio_url for reports that have audio in Storage but missing DB entry
+      await repairAudioUrls(cachedReports)
       return res.json({
         ticker: tickerUp, formType, reports: cachedReports,
         hasNarrative: cachedReports.some(r => r.narrative),
@@ -915,13 +1011,14 @@ app.get('/api/sec/reports', async (req, res) => {
     console.log(`[SEC] Fetching ${tickerUp} ${formType}...`)
     const reports = await fetchReportList(ticker, formType)
 
-    // Preserve existing narratives from cache
+    // Preserve existing narratives and audio from cache
     for (const r of reports) {
       const prev = cachedReports.find(cr => cr.id === r.id)
       if (prev?.narrative) {
         r.narrative = prev.narrative
         if (prev.narrativeSources) r.narrativeSources = prev.narrativeSources
       }
+      if (prev?.audioUrl) r.audioUrl = prev.audioUrl
     }
 
     // Narratives are generated on-demand via /api/sec/regenerate-narrative
@@ -986,6 +1083,91 @@ app.get('/api/sec/check-new', async (req, res) => {
   } catch (err) {
     console.error('Error /api/sec/check-new:', err.message)
     res.json({ checked: 0, newFilings: [] })
+  }
+})
+
+// ── ESEF reports (European tickers: CNMV, Euronext, LSE, etc.) ──────────────
+app.get('/api/esef/reports', async (req, res) => {
+  try {
+    const { ticker } = req.query
+    if (!ticker) return res.status(400).json({ error: 'Falta el parámetro ticker' })
+    if (!isEuropeanTicker(ticker)) return res.json({ reports: [], notEuropean: true })
+
+    const tickerUp = ticker.toUpperCase()
+
+    // 1. Check Supabase cache
+    let cachedReports = []
+    if (supabaseServer) {
+      try {
+        const { data } = await supabaseServer
+          .from('financial_reports')
+          .select('*')
+          .eq('ticker', tickerUp)
+          .eq('source', 'esef')
+          .order('report_date', { ascending: false })
+        if (data?.length) cachedReports = data.map(row => ({
+          id: row.id, ticker: row.ticker, source: row.source,
+          reportType: row.report_type, periodCurrent: row.period_current,
+          periodPrevious: row.period_previous, reportDate: row.report_date,
+          filedDate: row.filed_date, metrics: row.metrics, diagnosis: row.diagnosis,
+          narrative: row.narrative, narrativeSources: row.narrative_sources || [],
+          audioUrl: row.audio_url || null, fetchedAt: row.fetched_at,
+        }))
+      } catch (e) { console.warn('[ESEF] Supabase read error:', e.message) }
+    }
+
+    const isFresh = cachedReports.length > 0 &&
+      cachedReports[0].fetchedAt &&
+      (Date.now() - new Date(cachedReports[0].fetchedAt).getTime()) < 7 * 24 * 3600_000
+
+    if (isFresh) {
+      console.log(`[ESEF] Cache hit: ${tickerUp} (${cachedReports.length} reports)`)
+      await repairAudioUrls(cachedReports)
+      return res.json({
+        ticker: tickerUp, reports: cachedReports,
+        hasNarrative: cachedReports.some(r => r.narrative),
+      })
+    }
+
+    // 2. Fetch fresh from filings.xbrl.org
+    console.log(`[ESEF] Fetching ${tickerUp}...`)
+    const reports = await fetchEsefReportList(ticker)
+
+    // Preserve existing narratives and audio
+    for (const r of reports) {
+      const prev = cachedReports.find(cr => cr.id === r.id)
+      if (prev?.narrative) {
+        r.narrative = prev.narrative
+        if (prev.narrativeSources) r.narrativeSources = prev.narrativeSources
+      }
+      if (prev?.audioUrl) r.audioUrl = prev.audioUrl
+    }
+
+    // 3. Save to Supabase
+    if (supabaseServer && reports.length) {
+      const rows = reports.map(r => ({
+        id: r.id, ticker: r.ticker, source: 'esef',
+        report_type: r.reportType, period_current: r.periodCurrent,
+        period_previous: r.periodPrevious, report_date: r.reportDate,
+        filed_date: r.filedDate, metrics: r.metrics, diagnosis: r.diagnosis,
+        narrative: r.narrative || null, narrative_sources: r.narrativeSources || null,
+        audio_url: r.audioUrl || null,
+        fetched_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 30 * 24 * 3600_000).toISOString(),
+      }))
+      try {
+        const { error: upsertErr } = await supabaseServer.from('financial_reports').upsert(rows, { onConflict: 'id' })
+        if (upsertErr) console.warn('[ESEF] Supabase write error:', upsertErr.message)
+      } catch (e) { console.warn('[ESEF] Supabase write error:', e.message) }
+    }
+
+    res.json({
+      ticker: tickerUp, reports,
+      hasNarrative: reports.some(r => r.narrative),
+    })
+  } catch (err) {
+    console.error('Error /api/esef/reports:', err.message)
+    res.status(500).json({ error: err.message })
   }
 })
 
