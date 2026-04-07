@@ -281,9 +281,17 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
     </div>
 
     <!-- Empty state -->
-    <div v-if="!allAssets.length && !loadingRanking" class="flex flex-col items-center justify-center py-24">
-      <p class="text-muted-foreground text-sm">No hay activos guardados</p>
-      <p class="text-muted-foreground/50 text-xs mt-1">Añade activos desde la vista de Análisis</p>
+    <div v-if="!allAssets.length && !loadingRanking" class="flex flex-col items-center justify-center py-32">
+      <div class="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#415BFF" stroke-width="1.5" stroke-linecap="round">
+          <path d="M8 21h8" />
+          <path d="M12 17v4" />
+          <path d="M7 4h10" />
+          <path d="M5 8h14l-1 9H6Z" />
+        </svg>
+      </div>
+      <p class="text-muted-foreground text-sm mb-1">No hay activos guardados</p>
+      <p class="text-muted-foreground/50 text-xs">Añade activos desde la vista de Análisis</p>
     </div>
 
     <!-- Skeleton loader -->

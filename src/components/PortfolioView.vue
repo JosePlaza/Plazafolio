@@ -220,9 +220,16 @@ function fmtK(val) {
     </div>
 
     <!-- Empty state -->
-    <div v-if="!props.actives.length && !loading" class="flex flex-col items-center justify-center py-24">
-      <p class="text-muted-foreground text-sm">No hay activos en tu portfolio</p>
-      <p class="text-muted-foreground/50 text-xs mt-1">Añade activos desde la vista de Análisis</p>
+    <div v-if="!props.actives.length && !loading" class="flex flex-col items-center justify-center py-32">
+      <div class="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#415BFF" stroke-width="1.5" stroke-linecap="round">
+          <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+          <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+          <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
+        </svg>
+      </div>
+      <p class="text-muted-foreground text-sm mb-1">No hay activos en tu portfolio</p>
+      <p class="text-muted-foreground/50 text-xs">Añade activos desde la vista de Análisis</p>
     </div>
 
     <template v-else>

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
+import EarningsCallBrief from '@/components/EarningsCallBrief.vue'
 import { useSettings } from '@/composables/useSettings'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
 
@@ -183,6 +184,9 @@ const signalCounts = computed(() => {
         <button @click="emit('back')" class="mt-2 text-[11px] text-blue-400/70 hover:text-blue-300 underline">← Volver y reintentar</button>
       </div>
     </div>
+
+    <!-- Earnings Call Brief (associated to this report period) -->
+    <EarningsCallBrief :ticker="ticker" />
 
     <!-- Diagnosis signals -->
     <div v-if="report.diagnosis" class="glass-card p-4">

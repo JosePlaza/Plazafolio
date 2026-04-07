@@ -5,6 +5,7 @@ const RankingPage = () => import('@/views/RankingPage.vue')
 const PortfolioPage = () => import('@/views/PortfolioPage.vue')
 const DividendsPage = () => import('@/views/DividendsPage.vue')
 const SettingsView = () => import('@/components/SettingsView.vue')
+const SimulatorPage = () => import('@/views/SimulatorPage.vue')
 
 const routes = [
   { path: '/', redirect: '/analysis' },
@@ -13,6 +14,7 @@ const routes = [
   { path: '/portfolio', name: 'portfolio', component: PortfolioPage, meta: { tab: 'portfolio' } },
   { path: '/portfolio/:ticker', name: 'portfolio-detail', component: PortfolioPage, meta: { tab: 'portfolio' } },
   { path: '/dividends', name: 'dividends', component: DividendsPage, meta: { tab: 'dividends' } },
+  { path: '/simulator', name: 'simulator', component: SimulatorPage, meta: { tab: 'dividends' } },
   { path: '/settings', name: 'settings', component: SettingsView, meta: { tab: 'settings' } },
   { path: '/:pathMatch(.*)*', redirect: '/analysis' },
 ]

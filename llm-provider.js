@@ -198,6 +198,208 @@ function extractGroundingSources(candidate, fullResponse) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Portfolio Income Simulator — Contextual recommendations
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build prompt for "Optimal Mix" simulator recommendations.
+ * Gemini receives ranked candidates + suggested allocation and generates advice.
+ */
+function buildIncomeRecommendationPrompt(simulationData) {
+  const { assets, allocation, allocationTotals, amount, years } = simulationData
+
+  const candidateRows = assets
+    .slice(0, 10) // top 10 by composite score
+    .map((a, i) => {
+      const safety = a.safetyScore != null ? `Safety: ${a.safetyScore}/10` : 'Safety: ?'
+      const payout = a.payoutRatio != null ? `Payout: ${a.payoutRatio}%` : ''
+      return `${i + 1}. ${a.ticker} — Yield: ${a.yieldPct}% | CAGR div: ${a.dividendCAGR}% | ${safety} | ${payout} | Score: ${a.compositeScore}/10`
+    })
+    .join('\n')
+
+  const allocationRows = allocation
+    .map(a => `- ${a.ticker}: ${a.weight}% (€${a.amount}) → Income año ${years}: €${a.incomeYearN}/año`)
+    .join('\n')
+
+  const totalsSummary = allocationTotals
+    ? `Income total año ${years}: €${allocationTotals.incomeYearN}/año | Income acumulado ${years}a: €${allocationTotals.totalIncome} | Valor final: €${allocationTotals.finalValue}`
+    : ''
+
+  return `Eres un asesor de inversión en dividendos escribiendo para un inversor particular en español.
+
+CONTEXTO: El usuario quiere invertir €${amount} a ${years} años con reinversión de dividendos (DRIP).
+
+ACTIVOS CANDIDATOS (ordenados por score compuesto yield+crecimiento+seguridad):
+${candidateRows}
+
+ASIGNACIÓN SUGERIDA POR EL ALGORITMO:
+${allocationRows}
+${totalsSummary}
+
+Tu tarea: genera un ANÁLISIS DE LA ASIGNACIÓN (2-3 párrafos, máx 250 palabras).
+
+Analiza:
+1. ¿Tiene sentido la distribución propuesta? ¿El equilibrio entre yield alto (income inmediato) y CAGR alto (crecimiento futuro) es adecuado?
+2. ¿Hay algún activo que el algoritmo haya incluido pero tú desaconsejarías? (yield traps, payout insostenible, CAGR 0%)
+3. ¿Echas en falta algún tipo de activo para diversificar? (ej. solo hay tech, falta utilities/consumer staples)
+4. Comenta brevemente el efecto DRIP compuesto sobre el income proyectado.
+
+Reglas:
+- Español, tono asesor financiero cercano pero profesional
+- Solo párrafos, NUNCA listas con viñetas
+- Usa datos concretos (tickers, yields, CAGRs, scores) — no seas genérico
+- Si ves algún riesgo claro, dilo directamente
+- Termina con: "Esto no constituye asesoría financiera."
+- No repitas números que el usuario ya ve — interprétalos`
+}
+
+/**
+ * Generate contextual recommendations for the income simulator.
+ * Returns { text, sources } or null.
+ */
+export async function generateIncomeRecommendation(simulationData, apiKey) {
+  if (!apiKey) return null
+  const prompt = buildIncomeRecommendationPrompt(simulationData)
+  const result = await callGemini(prompt, apiKey)
+  return result
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Earnings Call Dividend Decoder — AI analysis of earnings call transcripts
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build prompt for Earnings Call Dividend Decoder.
+ * Two modes:
+ *   1. With transcript text → deep analysis of actual words
+ *   2. Without transcript → Gemini uses Google Search to find earnings call info
+ *
+ * @param {string} ticker
+ * @param {string} fiscalPeriod - e.g. "Q4 2025"
+ * @param {string|null} transcriptContext - Dividend-relevant excerpt, or null for search mode
+ */
+function buildEarningsCallPrompt(ticker, fiscalPeriod, transcriptContext) {
+  const hasTranscript = transcriptContext && transcriptContext.length > 100
+
+  const transcriptBlock = hasTranscript
+    ? `\nTRANSCRIPTO (extracto relevante a dividendos):\n---\n${transcriptContext}\n---\n`
+    : `\nNo hay transcripto disponible. Usa tu acceso a Google Search para buscar información sobre el earnings call de ${ticker} del periodo ${fiscalPeriod}. Busca específicamente: transcripciones, resúmenes de analistas, artículos sobre el call, declaraciones del CEO/CFO sobre dividendos y capital allocation.\n`
+
+  return `Eres un analista especializado en política de dividendos, escribiendo para inversores particulares en español.
+
+Empresa: ${ticker}
+Periodo: ${fiscalPeriod}
+${transcriptBlock}
+Tu tarea: genera un BRIEF DE EARNINGS CALL orientado a dividendos (3-4 párrafos, máx 300 palabras) con la siguiente estructura:
+
+1. POLÍTICA DE DIVIDENDOS — ¿Qué dijo el management sobre el dividendo? ¿Mencionaron payout target, política de crecimiento, compromiso con el dividendo? Si no mencionaron el dividendo, esto es una señal en sí misma — indícalo.
+
+2. ASIGNACIÓN DE CAPITAL — ¿Cómo distribuye la empresa su cash flow? ¿Priorizan dividendos, buybacks, reinversión, o reducción de deuda? ¿Hubo cambios respecto al trimestre anterior?
+
+3. TONO DEL MANAGEMENT — ¿El CEO/CFO sonó confiado, cauteloso, evasivo o entusiasta al hablar de retorno al accionista? Cita textualmente 2-3 frases clave del management (máx 25 palabras cada cita) que sean relevantes para la política de dividendos. Si no hay transcript, busca citas en fuentes públicas.
+
+Al final de tu respuesta, añade en una línea separada:
+TONO: [una palabra: Confiado | Cauteloso | Evasivo | Entusiasta | Neutral | Sin mención]
+
+Reglas:
+- Español, tono directo y profesional
+- Solo párrafos, NUNCA listas con viñetas
+- Las citas textuales deben ir entre comillas y atribuidas al speaker (ej: "Según el CFO: «...»")
+- Si el transcript no menciona dividendos en absoluto, di claramente: "El management no discutió la política de dividendos en este call" — esto es información valiosa
+- Si usas Google Search, cita las fuentes
+- No inventes citas — si no tienes la cita exacta, parafrasea indicándolo`
+}
+
+/**
+ * Generate Earnings Call Dividend Brief.
+ * Returns { text, sources, tone } or null.
+ *
+ * @param {string} ticker
+ * @param {string} fiscalPeriod
+ * @param {string|null} transcriptContext
+ * @param {string} apiKey
+ */
+export async function generateEarningsCallBrief(ticker, fiscalPeriod, transcriptContext, apiKey) {
+  if (!apiKey) return null
+  const prompt = buildEarningsCallPrompt(ticker, fiscalPeriod, transcriptContext)
+  const result = await callGemini(prompt, apiKey)
+  if (!result) return null
+
+  // Extract tone from the last line
+  let tone = 'Neutral'
+  const toneMatch = result.text.match(/TONO:\s*(Confiado|Cauteloso|Evasivo|Entusiasta|Neutral|Sin mención)/i)
+  if (toneMatch) {
+    tone = toneMatch[1]
+    // Remove the TONO line from the text
+    result.text = result.text.replace(/\n?TONO:\s*.+$/i, '').trim()
+  }
+
+  return {
+    text: result.text,
+    sources: result.sources || [],
+    tone,
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dividend Safety Analysis — AI-enhanced risk assessment
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build prompt for Dividend Safety Radar analysis.
+ * Gemini receives the mechanical score + factors and generates contextual analysis.
+ */
+function buildSafetyPrompt(ticker, safetyData) {
+  const factorRows = safetyData.factors
+    .map(f => `- ${f.name} (${f.weight}): ${f.label} — Score: ${f.score}/10 [${f.signal}]`)
+    .join('\n')
+
+  return `Eres un analista de riesgo de dividendos escribiendo para inversores particulares en español.
+
+Empresa: ${ticker}
+Score de Seguridad del Dividendo: ${safetyData.score}/10 (${safetyData.level})
+${safetyData.isReit ? '⚠️ Esta empresa es un REIT — los umbrales de payout son más altos por obligación legal de distribuir >90% de beneficios.' : ''}
+
+Desglose de factores:
+${factorRows}
+
+Resumen mecánico: ${safetyData.summary}
+
+CONTEXTO NOTICIOSO (OBLIGATORIO):
+Usa tu acceso a Google Search para buscar noticias recientes de ${ticker} que puedan afectar a la sostenibilidad del dividendo. Busca específicamente:
+- Recortes o aumentos de dividendo recientes o anunciados
+- Guidance del management sobre política de dividendos
+- Demandas, multas, o problemas regulatorios
+- Reestructuraciones, adquisiciones, o desinversiones
+- Cambios en la deuda o calificación crediticia
+- Problemas sectoriales que afecten al cash flow
+
+Tu tarea: escribe un ANÁLISIS DE RIESGO DEL DIVIDENDO (2-3 párrafos, máx 250 palabras) que:
+
+1. CONTEXTO — ¿Hay noticias recientes que afecten la seguridad del dividendo? Cita fuentes concretas.
+2. DIAGNÓSTICO — Explica los factores de riesgo principales (los que puntúan más bajo) y por qué importan. Si el dividendo es seguro, explica qué lo sostiene.
+3. QUÉ VIGILAR — Señales concretas que el inversor debería monitorear en los próximos trimestres.
+
+Reglas:
+- Español, tono directo y profesional
+- Solo párrafos, NUNCA listas con viñetas
+- No repitas los números que el usuario ya ve en la ficha — interprétalos
+- Sé específico: "la deuda/EBITDA de 3.2x limita el margen para mantener el dividendo si caen ingresos" es mejor que "la deuda es preocupante"
+- Cuando menciones noticias, indica la fuente`
+}
+
+/**
+ * Generate AI analysis for dividend safety.
+ * Returns { text, sources } or null if no API key.
+ */
+export async function generateSafetyAnalysis(ticker, safetyData, apiKey) {
+  if (!apiKey) return null
+  const prompt = buildSafetyPrompt(ticker, safetyData)
+  const result = await callGemini(prompt, apiKey)
+  return result
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TTS — Text-to-Speech via Gemini 2.5 Flash TTS
 // ─────────────────────────────────────────────────────────────────────────────
 

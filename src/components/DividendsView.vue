@@ -12,6 +12,8 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
 })
 
+const emit = defineEmits(['openSimulator'])
+
 const { displaySymbol, convert, nativeCurrencyOf, eurUsdRate } = useCurrency()
 const { transactions, load: loadTransactions } = useTransactions()
 
@@ -400,43 +402,122 @@ function fmt(val, dec = 2) {
       <div v-else class="spinner" style="width: 20px; height: 20px; border-width: 2px;"></div>
     </div>
 
+    <!-- Loading skeleton -->
+    <div v-if="loading && calendarData.length === 0" class="animate-pulse">
+      <!-- KPI + Simulator skeleton (equal width, same row) -->
+      <div class="grid grid-cols-2 gap-3 mb-6">
+        <div class="glass-card p-5">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div v-for="i in 4" :key="i" class="text-center space-y-2">
+              <div class="h-2.5 w-16 mx-auto rounded bg-white/[0.04]"></div>
+              <div class="h-5 w-20 mx-auto rounded bg-white/[0.05]"></div>
+            </div>
+          </div>
+        </div>
+        <div class="glass-card p-5 flex items-center gap-4">
+          <div class="w-[72px] h-[56px] rounded bg-white/[0.04] shrink-0"></div>
+          <div class="flex-1 space-y-2">
+            <div class="h-4 w-32 rounded bg-white/[0.05]"></div>
+            <div class="h-2.5 w-full rounded bg-white/[0.03]"></div>
+            <div class="h-2.5 w-3/4 rounded bg-white/[0.03]"></div>
+          </div>
+        </div>
+      </div>
+      <!-- Chart skeleton -->
+      <div class="glass-card p-4 mb-4">
+        <div class="h-3 w-40 rounded bg-white/[0.04] mb-3"></div>
+        <div class="h-[200px] rounded bg-white/[0.03]"></div>
+      </div>
+      <!-- Calendar skeleton -->
+      <div class="glass-card p-4">
+        <div class="h-3 w-32 rounded bg-white/[0.04] mb-3"></div>
+        <div class="grid grid-cols-7 gap-1">
+          <div v-for="i in 35" :key="i" class="h-10 rounded bg-white/[0.03]"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Empty state -->
-    <div v-if="!loading && calendarData.length === 0" class="flex flex-col items-center justify-center py-24">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground/30 mb-4">
-        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-        <line x1="16" y1="2" x2="16" y2="6" />
-        <line x1="8" y1="2" x2="8" y2="6" />
-        <line x1="3" y1="10" x2="21" y2="10" />
-      </svg>
-      <p class="text-muted-foreground text-sm">No hay posiciones con dividendos</p>
-      <p class="text-muted-foreground/50 text-xs mt-1">Registra transacciones en tus activos para ver el calendario</p>
+    <div v-else-if="!loading && calendarData.length === 0" class="flex flex-col items-center justify-center py-32">
+      <div class="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#415BFF" stroke-width="1.5" stroke-linecap="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+          <line x1="16" y1="2" x2="16" y2="6" />
+          <line x1="8" y1="2" x2="8" y2="6" />
+          <line x1="3" y1="10" x2="21" y2="10" />
+        </svg>
+      </div>
+      <p class="text-muted-foreground text-sm mb-1">No hay posiciones con dividendos</p>
+      <p class="text-muted-foreground/50 text-xs">Registra transacciones en tus activos para ver el calendario</p>
     </div>
 
     <template v-else>
-      <!-- KPI Row -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <div class="glass-card p-3 text-center">
-          <div class="text-[10px] uppercase text-muted-foreground tracking-wider mb-1">Ingreso anual</div>
-          <div class="text-lg font-bold text-primary">
-            {{ displaySymbol }}<AnimatedNumber :value="totalAnnualIncome" :decimals="0" />
+      <!-- KPI + Simulator row (always side by side, equal width) -->
+      <div class="grid grid-cols-2 gap-3 mb-6">
+        <!-- KPI card (all 4 metrics unified) -->
+        <div class="glass-card p-5 flex items-center">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full">
+            <div class="text-center">
+              <div class="text-[10px] uppercase text-muted-foreground tracking-wider mb-1.5">Ingreso anual</div>
+              <div class="text-lg font-bold text-primary tabular-nums">
+                {{ displaySymbol }}<AnimatedNumber :value="totalAnnualIncome" :decimals="0" />
+              </div>
+            </div>
+            <div class="text-center">
+              <div class="text-[10px] uppercase text-muted-foreground tracking-wider mb-1.5">Media mensual</div>
+              <div class="text-lg font-bold text-foreground tabular-nums">
+                {{ displaySymbol }}<AnimatedNumber :value="monthlyAvgIncome" :decimals="0" />
+              </div>
+            </div>
+            <div class="text-center">
+              <div class="text-[10px] uppercase text-muted-foreground tracking-wider mb-1.5">Activos pagando</div>
+              <div class="text-lg font-bold text-foreground">{{ calendarData.length }}</div>
+            </div>
+            <div class="text-center">
+              <div class="text-[10px] uppercase text-muted-foreground tracking-wider mb-1.5">Este mes</div>
+              <div class="text-lg font-bold tabular-nums" :class="monthlyTotalExpected > 0 ? 'text-primary' : 'text-muted-foreground'">
+                {{ displaySymbol }}<AnimatedNumber :value="monthlyTotalExpected" :decimals="0" />
+              </div>
+            </div>
           </div>
         </div>
-        <div class="glass-card p-3 text-center">
-          <div class="text-[10px] uppercase text-muted-foreground tracking-wider mb-1">Media mensual</div>
-          <div class="text-lg font-bold text-foreground">
-            {{ displaySymbol }}<AnimatedNumber :value="monthlyAvgIncome" :decimals="0" />
+
+        <!-- Simulator CTA card — compound interest parabola -->
+        <button
+          class="glass-card p-5 flex items-center gap-4 text-left transition-all hover:border-primary/30 group cursor-pointer"
+          @click="$emit('openSimulator')"
+        >
+          <!-- Animated compound interest curve -->
+          <div class="shrink-0">
+            <svg width="72" height="56" viewBox="0 0 72 56" fill="none" class="sim-chart">
+              <!-- Subtle grid -->
+              <line x1="0" y1="55" x2="72" y2="55" stroke="rgba(255,255,255,0.05)" stroke-width="1" />
+              <line x1="0" y1="38" x2="72" y2="38" stroke="rgba(255,255,255,0.03)" stroke-width="1" />
+              <line x1="0" y1="21" x2="72" y2="21" stroke="rgba(255,255,255,0.03)" stroke-width="1" />
+              <!-- Area under curve -->
+              <path d="M4 50 C16 48, 28 44, 36 36 C44 28, 52 16, 60 8 C64 4, 66 3, 68 2 L68 55 L4 55 Z" fill="url(#simGrad2)" class="sim-area" />
+              <!-- Compound interest parabola -->
+              <path d="M4 50 C16 48, 28 44, 36 36 C44 28, 52 16, 60 8 C64 4, 66 3, 68 2" stroke="#415BFF" stroke-width="2" stroke-linecap="round" fill="none" class="sim-curve" />
+              <!-- Glow dot at the end -->
+              <circle cx="68" cy="2" r="3" fill="#415BFF" class="sim-glow-dot" />
+              <circle cx="68" cy="2" r="6" fill="#415BFF" opacity="0.15" class="sim-glow-ring" />
+              <defs>
+                <linearGradient id="simGrad2" x1="0" y1="0" x2="0" y2="56">
+                  <stop offset="0%" stop-color="#415BFF" stop-opacity="0.2" />
+                  <stop offset="100%" stop-color="#415BFF" stop-opacity="0.01" />
+                </linearGradient>
+              </defs>
+            </svg>
           </div>
-        </div>
-        <div class="glass-card p-3 text-center">
-          <div class="text-[10px] uppercase text-muted-foreground tracking-wider mb-1">Activos pagando</div>
-          <div class="text-lg font-bold text-foreground">{{ calendarData.length }}</div>
-        </div>
-        <div class="glass-card p-3 text-center">
-          <div class="text-[10px] uppercase text-muted-foreground tracking-wider mb-1">Este mes</div>
-          <div class="text-lg font-bold" :class="monthlyTotalExpected > 0 ? 'text-primary' : 'text-muted-foreground'">
-            {{ displaySymbol }}<AnimatedNumber :value="monthlyTotalExpected" :decimals="0" />
+          <!-- Text + arrow -->
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-semibold text-foreground group-hover:text-primary transition-colors mb-0.5">Simulador de Inversión</div>
+            <div class="text-[11px] text-muted-foreground leading-snug">Descubre el mix óptimo para maximizar tus dividendos con interés compuesto</div>
           </div>
-        </div>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-600 group-hover:text-primary transition-colors shrink-0">
+            <path d="m9 18 6-6-6-6" />
+          </svg>
+        </button>
       </div>
 
       <!-- Calendar month strip -->
@@ -577,3 +658,57 @@ function fmt(val, dec = 2) {
     </template>
   </div>
 </template>
+
+<style scoped>
+/* Simulator CTA — compound interest curve loop */
+.sim-curve {
+  stroke-dasharray: 160;
+  stroke-dashoffset: 160;
+  animation: simDraw 2s ease-out forwards, simLoop 4s ease-in-out 2.5s infinite;
+}
+.sim-area {
+  opacity: 0;
+  animation: simFadeIn 0.6s ease-out 1.2s forwards, simAreaPulse 4s ease-in-out 2.5s infinite;
+}
+.sim-glow-dot {
+  opacity: 0;
+  transform-origin: center;
+  animation: simDotAppear 0.4s ease-out 1.8s forwards, simDotPulse 2s ease-in-out 2.5s infinite;
+}
+.sim-glow-ring {
+  opacity: 0;
+  transform-origin: center;
+  animation: simRingAppear 0.4s ease-out 1.8s forwards, simRingPulse 2s ease-in-out 2.5s infinite;
+}
+
+@keyframes simDraw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes simFadeIn {
+  to { opacity: 1; }
+}
+@keyframes simLoop {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+@keyframes simAreaPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+@keyframes simDotAppear {
+  0% { opacity: 0; transform: scale(0); }
+  60% { transform: scale(1.3); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes simDotPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.9; }
+}
+@keyframes simRingAppear {
+  to { opacity: 1; }
+}
+@keyframes simRingPulse {
+  0%, 100% { transform: scale(1); opacity: 0.15; }
+  50% { transform: scale(1.8); opacity: 0.05; }
+}
+</style>

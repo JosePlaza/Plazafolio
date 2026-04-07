@@ -5,7 +5,11 @@ import YahooFinance from 'yahoo-finance2'
 import { readFileSync, writeFileSync, existsSync, statSync } from 'fs'
 import { fetchReportList, getLatestFilingDate, isUsTicker } from './sec-edgar.js'
 import { fetchReportList as fetchEsefReportList, isEuropeanTicker } from './esef-reports.js'
-import { generateNarrative, generateAudio, testApiKey, checkModelsStatus } from './llm-provider.js'
+import { generateNarrative, generateAudio, generateSafetyAnalysis, generateEarningsCallBrief, generateIncomeRecommendation, testApiKey, checkModelsStatus } from './llm-provider.js'
+import { computeSafetyScore, isReit } from './dividend-safety.js'
+import { fetchTranscript, extractDividendContext } from './earnings-calls.js'
+import { simulateOptimalMix } from './income-simulator.js'
+import { computeBuyScore } from './src/lib/scoring.js'
 import { createClient } from '@supabase/supabase-js'
 
 // ─── Supabase server client (service role for writes, anon for reads) ───────
@@ -783,6 +787,671 @@ app.post('/api/llm/test-key', async (req, res) => {
   if (!geminiKey) return res.json({ ok: false, error: 'No API key provided' })
   const result = await testApiKey(geminiKey)
   res.json(result)
+})
+
+// ─── Dividend Safety Radar ──────────────────────────────────────────────────
+
+/**
+ * GET /api/dividend-safety/:ticker
+ * Calculates dividend safety score (mechanical) + optional Gemini analysis.
+ * Headers: x-gemini-key (optional — for AI analysis with grounding)
+ *
+ * Returns: { score, level, color, summary, isReit, factors, analysis?, sources?, cachedAt }
+ */
+app.get('/api/dividend-safety/:ticker', async (req, res) => {
+  const ticker = req.params.ticker?.toUpperCase()
+  if (!ticker) return res.status(400).json({ error: 'Ticker required' })
+
+  const geminiKey = req.headers['x-gemini-key'] || ''
+  const forceRefresh = req.query.refresh === 'true'
+
+  try {
+    // 1. Check Supabase cache first (24h TTL)
+    if (supabaseServer && !forceRefresh) {
+      try {
+        const { data: cached } = await supabaseServer
+          .from('dividend_safety')
+          .select('*')
+          .eq('ticker', ticker)
+          .single()
+
+        if (cached && cached.expires_at && new Date(cached.expires_at) > new Date()) {
+          console.log(`[Safety] Cache hit: ${ticker} (score: ${cached.score})`)
+          return res.json({
+            score: cached.score,
+            level: cached.level,
+            color: cached.color,
+            summary: cached.summary,
+            isReit: cached.is_reit,
+            factors: cached.factors,
+            analysis: cached.analysis,
+            sources: cached.sources,
+            cachedAt: cached.computed_at,
+          })
+        }
+      } catch { /* cache miss, continue */ }
+    }
+
+    // 2. Fetch data needed for scoring
+    console.log(`[Safety] Computing safety score for ${ticker}...`)
+
+    // Fetch cash flow — try FMP first, then Yahoo Finance fallback
+    let cashFlow = []
+
+    // A) FMP (may fail with 402 on free plan)
+    if (FMP_API_KEY) {
+      try {
+        const cfUrl = `https://financialmodelingprep.com/stable/cash-flow-statement?symbol=${encodeURIComponent(ticker)}&apikey=${FMP_API_KEY}`
+        let cfRes = await fetch(cfUrl)
+        if (cfRes.status === 402) {
+          const v3Url = `https://financialmodelingprep.com/api/v3/cash-flow-statement/${encodeURIComponent(ticker)}?period=annual&limit=10&apikey=${FMP_API_KEY}`
+          cfRes = await fetch(v3Url)
+        }
+        if (cfRes.ok) {
+          const cfData = await cfRes.json()
+          if (Array.isArray(cfData) && cfData.length > 0) {
+            cashFlow = cfData.map(d => ({
+              year: d.fiscalYear || d.calendarYear || d.date?.substring(0, 4),
+              freeCashFlow: d.freeCashFlow ?? d.free_cash_flow ?? 0,
+              dividendsPaid: Math.abs(d.commonDividendsPaid ?? d.netDividendsPaid ?? d.dividendsPaid ?? d.paymentOfDividends ?? 0),
+              operatingCashFlow: d.operatingCashFlow ?? d.operating_cash_flow ?? 0,
+            }))
+          }
+        }
+      } catch (err) {
+        console.warn(`[Safety] FMP cash flow fetch failed for ${ticker}:`, err.message)
+      }
+    }
+
+    // B) Yahoo Finance fallback — if FMP returned nothing
+    if (cashFlow.length === 0) {
+      try {
+        const cfPeriod = new Date()
+        cfPeriod.setFullYear(cfPeriod.getFullYear() - 6)
+        const [yahooCf, yahooQuote] = await Promise.all([
+          yf.fundamentalsTimeSeries(ticker, {
+            period1: cfPeriod.toISOString().split('T')[0],
+            type: 'annual',
+            module: 'cash-flow',
+          }).catch(() => []),
+          yf.quote(ticker).catch(() => null),
+        ])
+
+        const sharesOutstanding = yahooQuote?.sharesOutstanding || 0
+
+        if (yahooCf && yahooCf.length > 0) {
+          cashFlow = yahooCf
+            .filter(d => d.date)
+            .map(d => {
+              const dateStr = d.date instanceof Date ? d.date.toISOString().split('T')[0] : String(d.date)
+              const fcf = d.freeCashFlow ?? null
+              const ocf = d.operatingCashFlow ?? null
+
+              // Yahoo doesn't always provide dividendsPaid directly in cash-flow module
+              // Use cashDividendsPaid if available, otherwise estimate from commonStockDividendPaid
+              let divPaid = Math.abs(d.cashDividendsPaid ?? d.commonStockDividendPaid ?? d.paymentOfDividends ?? 0)
+
+              return {
+                year: dateStr.substring(0, 4),
+                freeCashFlow: fcf ?? (ocf != null && d.capitalExpenditure != null ? ocf + d.capitalExpenditure : 0),
+                dividendsPaid: divPaid,
+                operatingCashFlow: ocf ?? 0,
+              }
+            })
+            .sort((a, b) => b.year.localeCompare(a.year)) // newest first
+
+          console.log(`[Safety] Yahoo cash flow for ${ticker}: ${cashFlow.length} years, FCF[0]=${cashFlow[0]?.freeCashFlow}, DivPaid[0]=${cashFlow[0]?.dividendsPaid}`)
+        }
+      } catch (err) {
+        console.warn(`[Safety] Yahoo cash flow fallback failed for ${ticker}:`, err.message)
+      }
+    }
+
+    // C) Last resort: check Geraldine cached analysis in Supabase
+    if (cashFlow.length === 0 && supabaseServer) {
+      try {
+        const { data: cached } = await supabaseServer
+          .from('analyses')
+          .select('cash_flow, fundamentals')
+          .eq('ticker', ticker)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (cached?.cash_flow && Array.isArray(cached.cash_flow) && cached.cash_flow.length > 0) {
+          cashFlow = cached.cash_flow
+          console.log(`[Safety] Using Geraldine cached FMP cash flow for ${ticker}: ${cashFlow.length} years`)
+        } else if (cached?.fundamentals?.cashFlow && Array.isArray(cached.fundamentals.cashFlow) && cached.fundamentals.cashFlow.length > 0) {
+          // Map Yahoo fundamentals cashFlow format to safety format
+          cashFlow = cached.fundamentals.cashFlow.map(d => ({
+            year: d.date?.substring(0, 4),
+            freeCashFlow: d.freeCashFlow ?? 0,
+            dividendsPaid: 0, // not available in this format
+            operatingCashFlow: d.operatingCashFlow ?? 0,
+          }))
+          console.log(`[Safety] Using Geraldine cached Yahoo cash flow for ${ticker}: ${cashFlow.length} years`)
+        }
+      } catch { /* ignore */ }
+    }
+
+    if (cashFlow.length > 0) {
+      console.log(`[Safety] ${ticker}: cash flow data available (${cashFlow.length} years)`)
+    } else {
+      console.warn(`[Safety] ${ticker}: NO cash flow data from any source`)
+    }
+
+    // Fetch fundamentals from Yahoo Finance
+    const period1 = new Date()
+    period1.setFullYear(period1.getFullYear() - 8)
+    let fundamentals = { income: [], balance: [] }
+    try {
+      const [financials, balanceSheet] = await Promise.all([
+        yf.fundamentalsTimeSeries(ticker, { period1: period1.toISOString().split('T')[0], type: 'annual', module: 'financials' }).catch(() => []),
+        yf.fundamentalsTimeSeries(ticker, { period1: period1.toISOString().split('T')[0], type: 'annual', module: 'balance-sheet' }).catch(() => []),
+      ])
+
+      fundamentals.income = (financials || []).filter(d => d.date).map(d => ({
+        date: d.date instanceof Date ? d.date.toISOString().split('T')[0] : String(d.date),
+        totalRevenue: d.totalRevenue ?? null,
+        netIncome: d.netIncome ?? null,
+        ebitda: d.EBITDA ?? d.normalizedEBITDA ?? null,
+      })).sort((a, b) => a.date.localeCompare(b.date))
+
+      fundamentals.balance = (balanceSheet || []).filter(d => d.date).map(d => ({
+        date: d.date instanceof Date ? d.date.toISOString().split('T')[0] : String(d.date),
+        totalDebt: d.totalDebt ?? null,
+        netDebt: d.netDebt ?? null,
+      })).sort((a, b) => a.date.localeCompare(b.date))
+    } catch (err) {
+      console.warn(`[Safety] Fundamentals fetch failed for ${ticker}:`, err.message)
+    }
+
+    // Fetch dividend history — FMP first, Yahoo fallback
+    let dividends = []
+    if (FMP_API_KEY) {
+      try {
+        const divUrl = `https://financialmodelingprep.com/stable/historical-price-eod/dividend?symbol=${encodeURIComponent(ticker)}&apikey=${FMP_API_KEY}`
+        let divRes = await fetch(divUrl)
+        if (divRes.status === 402) {
+          const v3Url = `https://financialmodelingprep.com/api/v3/historical-price-full/stock_dividend/${encodeURIComponent(ticker)}?apikey=${FMP_API_KEY}`
+          divRes = await fetch(v3Url)
+        }
+        if (divRes.ok) {
+          const divData = await divRes.json()
+          const hist = Array.isArray(divData) ? divData : (divData.historical || [])
+          dividends = hist.map(d => ({
+            date: d.date,
+            amount: d.dividend ?? d.adjDividend ?? d.amount ?? 0,
+          })).filter(d => d.amount > 0)
+        }
+      } catch (err) {
+        console.warn(`[Safety] FMP dividends fetch failed for ${ticker}:`, err.message)
+      }
+    }
+    // Yahoo fallback for dividends
+    if (dividends.length === 0) {
+      try {
+        const divResult = await yf.chart(ticker, {
+          period1: new Date(Date.now() - 10 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          period2: new Date().toISOString().split('T')[0],
+          interval: '1d',
+          events: 'div',
+        })
+        dividends = (divResult?.events?.dividends || [])
+          .map(d => ({ date: d.date.toISOString().split('T')[0], amount: d.amount || 0 }))
+          .filter(d => d.amount > 0)
+        if (dividends.length > 0) console.log(`[Safety] Yahoo dividend fallback for ${ticker}: ${dividends.length} payments`)
+      } catch (err) {
+        console.warn(`[Safety] Yahoo dividends fallback failed for ${ticker}:`, err.message)
+      }
+    }
+
+    // Fetch profile for REIT detection
+    let profile = null
+    if (FMP_API_KEY) {
+      try {
+        const profUrl = `https://financialmodelingprep.com/stable/profile?symbol=${encodeURIComponent(ticker)}&apikey=${FMP_API_KEY}`
+        let profRes = await fetch(profUrl)
+        if (profRes.status === 402) {
+          const v3Url = `https://financialmodelingprep.com/api/v3/profile/${encodeURIComponent(ticker)}?apikey=${FMP_API_KEY}`
+          profRes = await fetch(v3Url)
+        }
+        if (profRes.ok) {
+          const profData = await profRes.json()
+          profile = Array.isArray(profData) ? profData[0] : profData
+        }
+      } catch (err) {
+        console.warn(`[Safety] Profile fetch failed for ${ticker}:`, err.message)
+      }
+    }
+
+    // 3. Compute mechanical score
+    const safetyResult = computeSafetyScore({ cashFlow, fundamentals, dividends, profile })
+    console.log(`[Safety] ${ticker}: score=${safetyResult.score} level=${safetyResult.level} isReit=${safetyResult.isReit}`)
+
+    // 4. Generate Gemini analysis (if API key provided)
+    let analysis = null
+    let sources = []
+    if (geminiKey) {
+      try {
+        const aiResult = await generateSafetyAnalysis(ticker, safetyResult, geminiKey)
+        if (aiResult) {
+          analysis = aiResult.text
+          sources = aiResult.sources || []
+          console.log(`[Safety] ${ticker}: AI analysis generated (${analysis.length} chars, ${sources.length} sources)`)
+        }
+      } catch (err) {
+        console.warn(`[Safety] Gemini analysis failed for ${ticker}:`, err.message)
+        // Continue without analysis — graceful degradation
+      }
+    }
+
+    // 5. Cache in Supabase
+    const response = {
+      score: safetyResult.score,
+      level: safetyResult.level,
+      color: safetyResult.color,
+      summary: safetyResult.summary,
+      isReit: safetyResult.isReit,
+      factors: safetyResult.factors,
+      analysis,
+      sources,
+      cachedAt: new Date().toISOString(),
+    }
+
+    if (supabaseServer) {
+      const now = new Date()
+      const expires = new Date(now.getTime() + 24 * 60 * 60 * 1000) // 24h TTL
+      try {
+        const { error: upsertError } = await supabaseServer
+          .from('dividend_safety')
+          .upsert({
+            ticker,
+            score: safetyResult.score,
+            level: safetyResult.level,
+            color: safetyResult.color,
+            summary: safetyResult.summary,
+            is_reit: safetyResult.isReit,
+            factors: safetyResult.factors,
+            analysis,
+            sources,
+            computed_at: now.toISOString(),
+            expires_at: expires.toISOString(),
+          }, { onConflict: 'ticker' })
+
+        if (upsertError) {
+          console.warn(`[Safety] Supabase cache write failed:`, upsertError.message)
+        } else {
+          console.log(`[Safety] ${ticker}: cached in Supabase (expires ${expires.toISOString()})`)
+        }
+      } catch (err) {
+        console.warn(`[Safety] Supabase cache write error:`, err.message)
+      }
+    }
+
+    res.json(response)
+  } catch (err) {
+    console.error(`[Safety] Error for ${ticker}:`, err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── Earnings Call Dividend Decoder ─────────────────────────────────────────
+
+/**
+ * GET /api/earnings-call/:ticker
+ * Fetches and analyzes the latest earnings call for dividend-relevant info.
+ * Strategy: FMP transcript (if available) → Gemini analysis
+ *           No transcript → Gemini Search grounding fallback
+ *
+ * Headers: x-gemini-key (required for analysis)
+ * Query: ?year=2025&quarter=4 (optional, defaults to most recent)
+ *
+ * Returns: { ticker, callDate, fiscalPeriod, brief, tone, sources, hasTranscript, analyzedAt }
+ */
+app.get('/api/earnings-call/:ticker', async (req, res) => {
+  const ticker = req.params.ticker?.toUpperCase()
+  if (!ticker) return res.status(400).json({ error: 'Ticker required' })
+
+  const geminiKey = req.headers['x-gemini-key'] || ''
+  const forceRefresh = req.query.refresh === 'true'
+  const requestedYear = req.query.year ? Number(req.query.year) : null
+  const requestedQuarter = req.query.quarter ? Number(req.query.quarter) : null
+
+  try {
+    // 1. Check Supabase cache first (~90 day TTL)
+    if (supabaseServer && !forceRefresh) {
+      try {
+        let query = supabaseServer
+          .from('earnings_call_briefs')
+          .select('*')
+          .eq('ticker', ticker)
+
+        // If specific period requested, filter by it
+        if (requestedYear && requestedQuarter) {
+          query = query.eq('fiscal_period', `Q${requestedQuarter} ${requestedYear}`)
+        } else {
+          query = query.order('call_date', { ascending: false }).limit(1)
+        }
+
+        const { data: cached } = await query
+
+        if (cached && cached.length > 0) {
+          const record = cached[0]
+          if (record.expires_at && new Date(record.expires_at) > new Date()) {
+            console.log(`[EarningsCall] Cache hit: ${ticker} ${record.fiscal_period}`)
+            return res.json({
+              ticker: record.ticker,
+              callDate: record.call_date,
+              fiscalPeriod: record.fiscal_period,
+              brief: record.brief,
+              tone: record.tone,
+              sources: record.sources,
+              hasTranscript: record.has_transcript,
+              analyzedAt: record.analyzed_at,
+            })
+          }
+        }
+      } catch { /* cache miss */ }
+    }
+
+    // 2. Try to fetch transcript from FMP
+    console.log(`[EarningsCall] Processing ${ticker}...`)
+    let transcript = null
+    if (FMP_API_KEY) {
+      transcript = await fetchTranscript(ticker, FMP_API_KEY, requestedYear, requestedQuarter)
+      if (transcript) {
+        console.log(`[EarningsCall] Got transcript: ${ticker} ${transcript.fiscalPeriod} (${transcript.contentLength} chars, ${transcript.segments.length} segments)`)
+      } else {
+        console.log(`[EarningsCall] No FMP transcript available for ${ticker} — will use Gemini search fallback`)
+      }
+    }
+
+    // 3. Generate Gemini analysis
+    if (!geminiKey) {
+      return res.status(400).json({ error: 'Se requiere Gemini API key para el análisis' })
+    }
+
+    // Determine fiscal period for the prompt
+    const fiscalPeriod = transcript?.fiscalPeriod || (() => {
+      if (requestedYear && requestedQuarter) return `Q${requestedQuarter} ${requestedYear}`
+      const now = new Date()
+      const prevQ = Math.max(1, Math.ceil(now.getMonth() / 3) - 1) || 4
+      const yr = prevQ === 4 ? now.getFullYear() - 1 : now.getFullYear()
+      return `Q${prevQ} ${yr}`
+    })()
+
+    // Extract dividend-focused context from transcript (or null for search mode)
+    const transcriptContext = transcript ? extractDividendContext(transcript.content) : null
+
+    const aiResult = await generateEarningsCallBrief(ticker, fiscalPeriod, transcriptContext, geminiKey)
+    if (!aiResult) {
+      return res.status(500).json({ error: 'Gemini no pudo generar el análisis' })
+    }
+
+    console.log(`[EarningsCall] ${ticker} ${fiscalPeriod}: brief=${aiResult.text.length} chars, tone=${aiResult.tone}, sources=${aiResult.sources.length}`)
+
+    // 4. Build response
+    const response = {
+      ticker,
+      callDate: transcript?.callDate || null,
+      fiscalPeriod,
+      brief: aiResult.text,
+      tone: aiResult.tone,
+      sources: aiResult.sources,
+      hasTranscript: !!transcript,
+      analyzedAt: new Date().toISOString(),
+    }
+
+    // 5. Cache in Supabase (~90 day TTL)
+    if (supabaseServer) {
+      const now = new Date()
+      const expires = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000)
+      try {
+        const { error: upsertError } = await supabaseServer
+          .from('earnings_call_briefs')
+          .upsert({
+            id: `${ticker}_${fiscalPeriod.replace(/\s/g, '_')}`,
+            ticker,
+            call_date: transcript?.callDate || null,
+            fiscal_period: fiscalPeriod,
+            brief: aiResult.text,
+            tone: aiResult.tone,
+            sources: aiResult.sources,
+            has_transcript: !!transcript,
+            analyzed_at: now.toISOString(),
+            expires_at: expires.toISOString(),
+          }, { onConflict: 'id' })
+
+        if (upsertError) {
+          console.warn(`[EarningsCall] Supabase cache write failed:`, upsertError.message)
+        }
+      } catch (err) {
+        console.warn(`[EarningsCall] Supabase error:`, err.message)
+      }
+    }
+
+    res.json(response)
+  } catch (err) {
+    console.error(`[EarningsCall] Error for ${ticker}:`, err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── Portfolio Income Simulator ─────────────────────────────────────────────
+
+/**
+ * POST /api/income-simulator
+ * "Optimal Mix" simulator — user provides an amount + candidates, server enriches
+ * each candidate with dividend data + safety score, runs projection, and optionally
+ * asks Gemini for allocation advice.
+ *
+ * Body: {
+ *   amount: 5000,                          // investment amount
+ *   years: 5,                              // projection horizon
+ *   candidates: [{ticker, name, currentPrice}]  // from portfolio + watchlist
+ * }
+ * Headers: x-gemini-key (optional)
+ */
+app.post('/api/income-simulator', async (req, res) => {
+  try {
+    const { amount, years = 5, candidates } = req.body
+    const geminiKey = req.headers['x-gemini-key'] || ''
+
+    if (!candidates || !Array.isArray(candidates) || candidates.length === 0) {
+      return res.status(400).json({ error: 'candidates array required' })
+    }
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'amount must be > 0' })
+    }
+
+    console.log(`[Simulator] Processing ${candidates.length} candidates, €${amount}, ${years}y`)
+
+    // Enrich each candidate with dividend data (Yahoo) + safety score (Supabase cache)
+    const enriched = await Promise.all(candidates.map(async (c) => {
+      const ticker = c.ticker?.toUpperCase()
+      if (!ticker) return null
+
+      let annualDividend = 0
+      let dividendCAGR = 0
+      let yieldPct = 0
+      let safetyScore = null
+      let safetyLevel = null
+      let safetyColor = null
+      let payoutRatio = null
+      let weiss = {} // Geraldine Weiss valuation data
+      const price = Number(c.currentPrice) || 0
+
+      // 1) Yahoo Finance: dividend history
+      try {
+        const result = await yf.chart(ticker, {
+          period1: new Date(Date.now() - 6 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          period2: new Date().toISOString().split('T')[0],
+          interval: '1d',
+          events: 'div',
+        })
+
+        const rawDivs = result?.events?.dividends || []
+        const payments = rawDivs
+          .map(d => ({ date: d.date.toISOString().split('T')[0], amount: d.amount || 0 }))
+          .filter(d => d.amount > 0)
+          .sort((a, b) => b.date.localeCompare(a.date))
+
+        if (payments.length > 0) {
+          const now = new Date()
+          const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()).toISOString().split('T')[0]
+          const ttm = payments.filter(p => p.date >= oneYearAgo)
+          annualDividend = ttm.length > 0
+            ? ttm.reduce((s, p) => s + p.amount, 0)
+            : payments.slice(0, 4).reduce((s, p) => s + p.amount, 0)
+
+          if (price > 0) yieldPct = (annualDividend / price) * 100
+
+          // CAGR — exclude current year (incomplete, would distort the calculation)
+          const currentYr = String(new Date().getFullYear())
+          const byYear = {}
+          for (const p of payments) {
+            const yr = p.date.substring(0, 4)
+            if (yr === currentYr) continue // skip incomplete year
+            byYear[yr] = (byYear[yr] || 0) + p.amount
+          }
+          const sortedYears = Object.keys(byYear).sort()
+          if (sortedYears.length >= 3) {
+            const recentYr = sortedYears[sortedYears.length - 1]
+            const oldIdx = Math.max(0, sortedYears.length - 6)
+            const oldYr = sortedYears[oldIdx]
+            const n = Number(recentYr) - Number(oldYr)
+            if (n > 0 && byYear[oldYr] > 0 && byYear[recentYr] > 0) {
+              dividendCAGR = Math.pow(byYear[recentYr] / byYear[oldYr], 1 / n) - 1
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[Simulator] Yahoo fetch failed for ${ticker}:`, err.message)
+      }
+
+      // 2) Supabase cache: safety score (if available)
+      if (supabaseServer) {
+        try {
+          const { data: safetyRow } = await supabaseServer
+            .from('dividend_safety')
+            .select('score, level, color, factors')
+            .eq('ticker', ticker)
+            .maybeSingle()
+
+          if (safetyRow) {
+            safetyScore = safetyRow.score
+            safetyLevel = safetyRow.level
+            safetyColor = safetyRow.color
+            // Extract payout ratio from factors if available
+            const factors = safetyRow.factors
+            if (factors) {
+              const prFactor = Array.isArray(factors) ? factors.find(f => f.key === 'payoutRatio') : factors.payoutRatio
+              if (prFactor?.value != null) payoutRatio = prFactor.value
+            }
+          }
+        } catch { /* cache miss is fine */ }
+      }
+
+      // 3) Supabase cache: Geraldine Weiss valuation data + full buy score
+      if (supabaseServer) {
+        try {
+          const { data: analysisRow } = await supabaseServer
+            .from('analyses')
+            .select('indicators, projection, dividends, cash_flow, fundamentals')
+            .eq('ticker', ticker)
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+          if (analysisRow?.indicators) {
+            const ind = analysisRow.indicators
+            const avgHigh = Number(ind.avgHighYield || 0)
+            const avgLow = Number(ind.avgLowYield || 0)
+            const curYield = Number(ind.currentYield || 0)
+            const overvaluedPrice = Number(ind.overvaluedPrice || 0)
+
+            const range = avgHigh - avgLow
+            if (range > 0) {
+              weiss.yieldRatio = Math.max(0, (curYield - avgLow) / range)
+            }
+            if (overvaluedPrice > 0 && price > 0) {
+              weiss.upsidePct = ((overvaluedPrice - price) / price) * 100
+            }
+
+            // Compute full Geraldine Weiss buy score (same as ranking page)
+            try {
+              const scoring = computeBuyScore(
+                ind,
+                analysisRow.projection || null,
+                analysisRow.dividends || [],
+                analysisRow.cash_flow || [],
+                analysisRow.fundamentals || null
+              )
+              if (scoring && scoring.score > 0) {
+                weiss.score = scoring.score
+                weiss.signal = scoring.signal
+              }
+            } catch { /* scoring computation failed, use fallback */ }
+          }
+        } catch { /* cache miss is fine */ }
+      }
+
+      if (annualDividend > 0) {
+        const wr = weiss.yieldRatio != null ? ` weissR=${weiss.yieldRatio.toFixed(2)}` : ''
+        const up = weiss.upsidePct != null ? ` upside=${weiss.upsidePct.toFixed(0)}%` : ''
+        console.log(`[Simulator] ${ticker}: yield=${yieldPct.toFixed(1)}%, CAGR=${(dividendCAGR * 100).toFixed(1)}%, safety=${safetyScore || '?'}${wr}${up}`)
+      }
+
+      return {
+        ticker,
+        name: c.name || ticker,
+        currentPrice: price,
+        annualDividend,
+        dividendCAGR,
+        yieldPct,
+        safetyScore,
+        safetyLevel,
+        safetyColor,
+        payoutRatio,
+        weiss,
+      }
+    }))
+
+    const validCandidates = enriched.filter(a => a && a.annualDividend > 0 && a.currentPrice > 0)
+
+    if (validCandidates.length === 0) {
+      return res.json({
+        assets: [],
+        allocation: [],
+        allocationTotals: null,
+        amount,
+        years,
+        error: 'Ningún activo con dividendos encontrado',
+      })
+    }
+
+    // Run optimal mix simulation
+    const result = simulateOptimalMix({ amount, years, candidates: validCandidates })
+
+    // Gemini recommendation (optional)
+    let recommendation = null
+    if (geminiKey && result.assets.length > 0) {
+      try {
+        const aiResult = await generateIncomeRecommendation(result, geminiKey)
+        if (aiResult) {
+          recommendation = { text: aiResult.text, sources: aiResult.sources || [] }
+        }
+      } catch (err) {
+        console.warn(`[Simulator] Gemini recommendation failed:`, err.message)
+      }
+    }
+
+    res.json({ ...result, recommendation })
+  } catch (err) {
+    console.error(`[Simulator] Error:`, err.message)
+    res.status(500).json({ error: err.message })
+  }
 })
 
 // POST regenerate narrative for a specific report (with grounding)

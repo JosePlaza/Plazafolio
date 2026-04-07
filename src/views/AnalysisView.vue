@@ -16,6 +16,8 @@ import EvEbitdaChart from '@/components/charts/EvEbitdaChart.vue'
 import DebtChart from '@/components/charts/DebtChart.vue'
 import SharesChart from '@/components/charts/SharesChart.vue'
 import SecReportDetail from '@/components/SecReportDetail.vue'
+import DividendSafetyCard from '@/components/DividendSafetyCard.vue'
+import EarningsCallBrief from '@/components/EarningsCallBrief.vue'
 import { useSettings } from '@/composables/useSettings'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
 import { fetchSecReports as fetchSecReportsApi, regenerateNarrative as regenerateNarrativeApi, generateReportAudio } from '@/services/secReportsApi'
@@ -506,6 +508,10 @@ watch(() => app.ticker.value, (newTicker) => {
             </button>
           </div>
         </div>
+
+        <!-- ═══ Dividend Safety Radar + Earnings Call ═══ -->
+        <DividendSafetyCard :ticker="app.ticker.value" class="mt-4" />
+        <EarningsCallBrief :ticker="app.ticker.value" class="mt-4" />
 
         <!-- Charts grid -->
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">

@@ -27,10 +27,12 @@ export function useAppState() {
   async function onGenerate(t, periodYears) {
     const resolvedYears = periodYears || years.value
     companyName.value = t
-    companyLogo.value = null
+    // Keep existing logo during loading — only clear if a new one arrives
+    const prevLogo = companyLogo.value
     await generate(t, resolvedYears)
     if (data.profile?.companyName) companyName.value = data.profile.companyName
     if (data.profile?.image) companyLogo.value = data.profile.image
+    else if (!prevLogo) companyLogo.value = null // only clear if there was no previous logo
     const currentPrice = data.indicators?.currentPrice
     if (currentPrice) {
       const all = [...actives.value, ...watchlist.value]

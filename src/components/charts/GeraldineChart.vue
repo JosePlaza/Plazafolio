@@ -67,7 +67,7 @@ const chartOptions = computed(() => {
       animation: { duration: 800 },
     },
     title: {
-      text: 'Tesis',
+      text: 'Geraldine Band',
       align: 'left',
       style: titleStyle,
     },

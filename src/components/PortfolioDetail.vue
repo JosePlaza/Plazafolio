@@ -7,6 +7,8 @@ import AnimatedNumber from '@/components/AnimatedNumber.vue'
 import ToastNotification from '@/components/ToastNotification.vue'
 import DatePicker from '@/components/DatePicker.vue'
 import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
+import DividendSafetyCard from '@/components/DividendSafetyCard.vue'
+import EarningsCallBrief from '@/components/EarningsCallBrief.vue'
 const props = defineProps({
   asset: { type: Object, required: true },
   indicators: { type: Object, default: null },
@@ -997,6 +999,12 @@ function fmtDate(dateStr) {
         </button>
       </div>
     </div>
+
+    <!-- ═══ Dividend Safety Radar ═══ -->
+    <DividendSafetyCard :ticker="asset.ticker" class="mb-4" />
+
+    <!-- ═══ Earnings Call Dividend Decoder ═══ -->
+    <EarningsCallBrief :ticker="asset.ticker" class="mb-4" />
 
     <!-- ═══ Price Chart Card ═══ -->
     <div class="glass-card p-4 mb-4">
