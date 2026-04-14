@@ -388,9 +388,9 @@ app.get('/api/fundamentals', async (req, res) => {
       enterpriseValue = summary?.defaultKeyStatistics?.enterpriseValue ?? null
     } catch { /* ignore */ }
 
-    // Map financials (income statement)
+    // Map financials (income statement) — skip entries where key fields are all null
     const income = (financials || [])
-      .filter((d) => d.date)
+      .filter((d) => d.date && (d.totalRevenue != null || d.netIncome != null))
       .map((d) => ({
         date: d.date instanceof Date ? d.date.toISOString().split('T')[0] : String(d.date),
         totalRevenue: d.totalRevenue ?? null,
@@ -404,9 +404,9 @@ app.get('/api/fundamentals', async (req, res) => {
       }))
       .sort((a, b) => a.date.localeCompare(b.date))
 
-    // Map balance sheet
+    // Map balance sheet — skip entries where key fields are all null
     const balance = (balanceSheet || [])
-      .filter((d) => d.date)
+      .filter((d) => d.date && (d.totalDebt != null || d.netDebt != null || d.stockholdersEquity != null || d.ordinarySharesNumber != null))
       .map((d) => ({
         date: d.date instanceof Date ? d.date.toISOString().split('T')[0] : String(d.date),
         totalDebt: d.totalDebt ?? null,
@@ -419,14 +419,16 @@ app.get('/api/fundamentals', async (req, res) => {
       }))
       .sort((a, b) => a.date.localeCompare(b.date))
 
-    // Map cash flow
+    // Map cash flow — skip entries where key fields are all null
     const cf = (cashFlow || [])
-      .filter((d) => d.date)
+      .filter((d) => d.date && (d.operatingCashFlow != null || d.freeCashFlow != null))
       .map((d) => ({
         date: d.date instanceof Date ? d.date.toISOString().split('T')[0] : String(d.date),
         operatingCashFlow: d.operatingCashFlow ?? null,
         capitalExpenditure: d.capitalExpenditure ?? null,
         freeCashFlow: d.freeCashFlow ?? null,
+        depreciationAndAmortization: d.depreciationAndAmortization ?? null,
+        commonDividendsPaid: Math.abs(d.cashDividendsPaid ?? d.commonStockDividendPaid ?? d.paymentOfDividends ?? 0) || null,
       }))
       .sort((a, b) => a.date.localeCompare(b.date))
 
@@ -873,8 +875,8 @@ app.get('/api/dividend-safety/:ticker', async (req, res) => {
             period1: cfPeriod.toISOString().split('T')[0],
             type: 'annual',
             module: 'cash-flow',
-          }).catch(() => []),
-          yf.quote(ticker).catch(() => null),
+          }, { validateResult: false }).catch(() => []),
+          yf.quote(ticker, {}, { validateResult: false }).catch(() => null),
         ])
 
         const sharesOutstanding = yahooQuote?.sharesOutstanding || 0
@@ -946,8 +948,8 @@ app.get('/api/dividend-safety/:ticker', async (req, res) => {
     let fundamentals = { income: [], balance: [] }
     try {
       const [financials, balanceSheet] = await Promise.all([
-        yf.fundamentalsTimeSeries(ticker, { period1: period1.toISOString().split('T')[0], type: 'annual', module: 'financials' }).catch(() => []),
-        yf.fundamentalsTimeSeries(ticker, { period1: period1.toISOString().split('T')[0], type: 'annual', module: 'balance-sheet' }).catch(() => []),
+        yf.fundamentalsTimeSeries(ticker, { period1: period1.toISOString().split('T')[0], type: 'annual', module: 'financials' }, { validateResult: false }).catch(() => []),
+        yf.fundamentalsTimeSeries(ticker, { period1: period1.toISOString().split('T')[0], type: 'annual', module: 'balance-sheet' }, { validateResult: false }).catch(() => []),
       ])
 
       fundamentals.income = (financials || []).filter(d => d.date).map(d => ({
@@ -996,7 +998,7 @@ app.get('/api/dividend-safety/:ticker', async (req, res) => {
           period2: new Date().toISOString().split('T')[0],
           interval: '1d',
           events: 'div',
-        })
+        }, { validateResult: false })
         dividends = (divResult?.events?.dividends || [])
           .map(d => ({ date: d.date.toISOString().split('T')[0], amount: d.amount || 0 }))
           .filter(d => d.amount > 0)

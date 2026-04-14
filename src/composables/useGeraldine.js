@@ -173,7 +173,7 @@ export function useGeraldine() {
     try {
       const { result, profile, cashFlow, fundamentals } = await fetchAndCompute(ticker.value, periodYears)
       applyData(result, profile, cashFlow, fundamentals)
-      await saveToCache(ticker.value, periodYears, result, profile)
+      await saveToCache(ticker.value, periodYears, result, profile, cashFlow, fundamentals)
     } catch (err) {
       console.error('Error generando análisis:', err)
       error.value = err.response?.data?.['Error Message'] || err.message || 'Error al obtener datos'

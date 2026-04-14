@@ -160,7 +160,7 @@ function calcFcfCoverageScore(cashFlow) {
  * @param {Object} fundamentals - { income: [], balance: [] }
  * @returns {{ score: number, value: number|null, trend: string, label: string }}
  */
-function calcDebtScore(fundamentals) {
+function calcDebtScore(fundamentals, isReitStock = false) {
   if (!fundamentals || !fundamentals.income?.length || !fundamentals.balance?.length) {
     return { score: 5, value: null, trend: 'unknown', label: 'Sin datos' }
   }
@@ -196,12 +196,22 @@ function calcDebtScore(fundamentals) {
   }
 
   let score
-  if (ratio < 1) score = 10
-  else if (ratio < 2) score = 8
-  else if (ratio < 3) score = 6
-  else if (ratio < 4) score = 4
-  else if (ratio < 5) score = 2
-  else score = 1
+  if (isReitStock) {
+    // REITs operate with higher leverage by nature (5-7x Debt/EBITDA is normal)
+    if (ratio < 4) score = 10
+    else if (ratio < 5) score = 8
+    else if (ratio < 6) score = 7
+    else if (ratio < 7) score = 5
+    else if (ratio < 8) score = 3
+    else score = 1
+  } else {
+    if (ratio < 1) score = 10
+    else if (ratio < 2) score = 8
+    else if (ratio < 3) score = 6
+    else if (ratio < 4) score = 4
+    else if (ratio < 5) score = 2
+    else score = 1
+  }
 
   // Adjust for trend
   if (trend === 'increasing') score = Math.max(1, score - 1)
@@ -228,27 +238,37 @@ function calcConsistencyScore(dividends) {
     return { score: 5, streak: 0, label: 'Historial insuficiente' }
   }
 
-  // Group by year
+  // Group by year: track total AND count of payments
+  // Using average per-payment instead of annual totals avoids false "cuts"
+  // for monthly payers (like REITs) where the number of ex-dates per calendar
+  // year can vary (11, 12, or 13) due to timing shifts.
   const byYear = {}
   for (const d of dividends) {
     const year = String(d.date).substring(0, 4)
     const amt = Number(d.amount || d.dividend || 0)
     if (amt > 0) {
-      byYear[year] = (byYear[year] || 0) + amt
+      if (!byYear[year]) byYear[year] = { total: 0, count: 0 }
+      byYear[year].total += amt
+      byYear[year].count++
     }
   }
+
+  // Exclude current year — it's likely incomplete (not all quarters reported yet)
+  const currentYear = String(new Date().getFullYear())
+  delete byYear[currentYear]
 
   const years = Object.keys(byYear).sort()
   if (years.length < 2) return { score: 5, streak: 0, label: 'Solo 1 año' }
 
   // Count consecutive growth years from most recent
+  // Compare average dividend per payment to neutralize timing artifacts
   let streak = 0
   let cuts = 0
   let freezes = 0
   for (let i = years.length - 1; i > 0; i--) {
-    const curr = byYear[years[i]]
-    const prev = byYear[years[i - 1]]
-    const change = (curr - prev) / prev
+    const currAvg = byYear[years[i]].total / byYear[years[i]].count
+    const prevAvg = byYear[years[i - 1]].total / byYear[years[i - 1]].count
+    const change = (currAvg - prevAvg) / prevAvg
 
     if (change > 0.005) {
       if (cuts === 0 && freezes === 0) streak++
@@ -409,7 +429,7 @@ export function computeSafetyScore({ cashFlow, fundamentals, dividends, profile 
   // Calculate each factor
   const payout = calcPayoutScore(cashFlow, reit)
   const fcfCoverage = calcFcfCoverageScore(cashFlow)
-  const debt = calcDebtScore(fundamentals)
+  const debt = calcDebtScore(fundamentals, reit)
   const consistency = calcConsistencyScore(dividends)
   const eps = calcEpsScore(fundamentals)
   const revenue = calcRevenueScore(fundamentals)

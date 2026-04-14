@@ -247,6 +247,7 @@ export async function getCachedAnalysis(ticker) {
 
 export async function getAllCachedAnalyses() {
   const userId = await getUserId()
+  const local = readAnalysisLocal()
 
   if (userId) {
     try {
@@ -256,7 +257,8 @@ export async function getAllCachedAnalyses() {
         .eq('user_id', userId)
 
       if (!error && data) {
-        const result = {}
+        // Merge: start with local analyses, then overlay Supabase data (source of truth)
+        const result = { ...local }
         data.forEach(row => {
           result[row.ticker] = {
             ticker: row.ticker,
@@ -278,7 +280,7 @@ export async function getAllCachedAnalyses() {
     } catch { /* offline */ }
   }
 
-  return readAnalysisLocal()
+  return local
 }
 
 export async function saveCachedAnalysis(ticker, years, analysisData, profile) {
@@ -300,7 +302,7 @@ export async function saveCachedAnalysis(ticker, years, analysisData, profile) {
   const userId = await getUserId()
   if (userId) {
     try {
-      await supabase.from('analyses').upsert({
+      const { error: upsertError } = await supabase.from('analyses').upsert({
         user_id: userId,
         ticker: key,
         years,
@@ -312,6 +314,9 @@ export async function saveCachedAnalysis(ticker, years, analysisData, profile) {
         fundamentals: analysisData.fundamentals || null,
         profile: profile || null,
       }, { onConflict: 'user_id,ticker' })
+      if (upsertError) {
+        console.warn('Supabase saveCachedAnalysis upsert error:', upsertError.message)
+      }
     } catch (err) {
       console.warn('Supabase saveCachedAnalysis failed:', err.message)
     }

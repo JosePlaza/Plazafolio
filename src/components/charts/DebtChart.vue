@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Highcharts from 'highcharts'
 import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
-import { labelStyle, gridColor, titleStyle, earthyBrown, legendBottom, fmtNum, yearFromDate, buildTooltip, freshSubtitle } from '@/lib/chartConfig'
+import { labelStyle, gridColor, titleStyle, earthyBrown, legendBottom, fmtNum, yearFromDate, buildTooltip, freshSubtitle, chartTitle } from '@/lib/chartConfig'
 import { useCurrency } from '@/composables/useCurrency'
 
 const props = defineProps({
@@ -36,10 +36,12 @@ const chartOptions = computed(() => {
     if (!fcf || fcf <= 0 || !nd) return null
     return parseFloat((nd / fcf).toFixed(2))
   })
+  const lastRatio = [...ratioData].reverse().find(v => v != null)
+  const health = lastRatio == null ? null : lastRatio < 3 ? 'green' : lastRatio <= 5 ? 'neutral' : 'red'
 
   return {
     chart: { backgroundColor: 'transparent', style: { fontFamily: 'Inter, system-ui, sans-serif' }, spacing: [16, 16, 12, 16] },
-    title: { text: 'Deuda', align: 'left', style: titleStyle },
+    title: chartTitle('Deuda', health),
     subtitle: freshSubtitle(props.freshLabel),
     xAxis: { categories, labels: { style: labelStyle }, lineColor: 'rgba(255,255,255,0.06)', tickLength: 0 },
     yAxis: [

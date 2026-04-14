@@ -49,6 +49,21 @@ export function yearFromDate(dateStr) {
   return String(dateStr || '').substring(0, 4)
 }
 
+// Health indicator colors
+export const healthColors = { green: '#34d399', neutral: '#fbbf24', red: '#f87171' }
+
+// Build chart title with optional health dot
+export function chartTitle(text, health) {
+  if (!health) return { text, align: 'left', style: titleStyle, useHTML: false }
+  const color = healthColors[health]
+  return {
+    text: `${text} <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-left:6px;vertical-align:middle;opacity:0.85;"></span>`,
+    useHTML: true,
+    align: 'left',
+    style: titleStyle,
+  }
+}
+
 // Glassmorphism tooltip builder
 export function buildTooltip(x, points, opts = {}) {
   let html = `<div style="background:rgba(14,14,22,0.85);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px 14px;box-shadow:0 8px 32px rgba(0,0,0,0.4);min-width:160px;">`

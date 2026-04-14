@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Highcharts from 'highcharts'
 import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
-import { labelStyle, gridColor, titleStyle, legendBottom, yearFromDate, freshSubtitle } from '@/lib/chartConfig'
+import { labelStyle, gridColor, titleStyle, legendBottom, yearFromDate, freshSubtitle, chartTitle } from '@/lib/chartConfig'
 
 const props = defineProps({
   fundamentals: { type: Object, default: null },
@@ -20,10 +20,12 @@ const chartOptions = computed(() => {
   const grossMargin = inc.map((d) => d.totalRevenue > 0 ? parseFloat(((d.grossProfit / d.totalRevenue) * 100).toFixed(2)) : null)
   const operatingMargin = inc.map((d) => d.totalRevenue > 0 ? parseFloat(((d.operatingIncome / d.totalRevenue) * 100).toFixed(2)) : null)
   const netMargin = inc.map((d) => d.totalRevenue > 0 ? parseFloat(((d.netIncome / d.totalRevenue) * 100).toFixed(2)) : null)
+  const lastMargin = [...netMargin].reverse().find(v => v != null)
+  const health = lastMargin == null ? null : lastMargin > 15 ? 'green' : lastMargin >= 5 ? 'neutral' : 'red'
 
   return {
     chart: { backgroundColor: 'transparent', style: { fontFamily: 'Inter, system-ui, sans-serif' }, spacing: [16, 16, 12, 16] },
-    title: { text: 'Márgenes', align: 'left', style: titleStyle },
+    title: chartTitle('Márgenes', health),
     subtitle: freshSubtitle(props.freshLabel),
     xAxis: { categories, labels: { style: labelStyle }, lineColor: 'rgba(255,255,255,0.06)', tickLength: 0 },
     yAxis: { title: { text: null }, labels: { style: labelStyle, format: '{value}%' }, gridLineColor: gridColor, gridLineDashStyle: 'Dot' },

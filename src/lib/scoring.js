@@ -30,23 +30,34 @@
 function calcDividendStreak(dividends) {
   if (!dividends || dividends.length === 0) return 0
 
-  // Agrupar dividendos por ano fiscal
+  // Agrupar dividendos por ano fiscal: total y count por ano
+  // Usar media por pago en vez de total anual para evitar falsos cortes
+  // en pagadores mensuales (REITs) donde el numero de ex-dates por ano varia
   const byYear = {}
   for (const d of dividends) {
     const year = String(d.date).substring(0, 4)
     const amt = Number(d.amount || d.dividend || 0)
     if (amt > 0) {
-      byYear[year] = (byYear[year] || 0) + amt
+      if (!byYear[year]) byYear[year] = { total: 0, count: 0 }
+      byYear[year].total += amt
+      byYear[year].count++
     }
   }
+
+  // Excluir ano actual (incompleto — rompe el streak falsamente)
+  const currentYear = String(new Date().getFullYear())
+  delete byYear[currentYear]
 
   const years = Object.keys(byYear).sort()
   if (years.length < 2) return 0
 
   // Contar anos consecutivos de crecimiento desde el mas reciente hacia atras
+  // Comparar media por pago, no total anual
   let streak = 0
   for (let i = years.length - 1; i > 0; i--) {
-    if (byYear[years[i]] > byYear[years[i - 1]]) {
+    const currAvg = byYear[years[i]].total / byYear[years[i]].count
+    const prevAvg = byYear[years[i - 1]].total / byYear[years[i - 1]].count
+    if (currAvg > prevAvg * 1.005) {
       streak++
     } else {
       break

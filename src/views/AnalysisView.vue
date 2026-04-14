@@ -7,10 +7,11 @@ import YieldsChart from '@/components/charts/YieldsChart.vue'
 import DividendsChart from '@/components/charts/DividendsChart.vue'
 import ProjectionChart from '@/components/charts/ProjectionChart.vue'
 import DrawdownChart from '@/components/charts/DrawdownChart.vue'
-import SustainabilityChart from '@/components/charts/SustainabilityChart.vue'
 import DividendHistoryChart from '@/components/charts/DividendHistoryChart.vue'
+import FinancialOverviewChart from '@/components/charts/FinancialOverviewChart.vue'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
 import MarginsChart from '@/components/charts/MarginsChart.vue'
+import ValuationChart from '@/components/charts/ValuationChart.vue'
 import EvFcfChart from '@/components/charts/EvFcfChart.vue'
 import EvEbitdaChart from '@/components/charts/EvEbitdaChart.vue'
 import DebtChart from '@/components/charts/DebtChart.vue'
@@ -533,15 +534,14 @@ watch(() => app.ticker.value, (newTicker) => {
           <div class="glass-card p-4"><ProjectionChart :projection="app.data.projection" :indicators="app.data.indicators" :ticker="app.ticker.value" :currency="app.currency.value" :fresh-label="freshLabels.dividend" /></div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="glass-card p-4"><SustainabilityChart :cash-flow="app.data.cashFlow" :ticker="app.ticker.value" :currency="app.currency.value" :fresh-label="freshLabels.cashFlow" /></div>
-          <div class="glass-card p-4"><DrawdownChart :drawdown="app.data.drawdown" :ticker="app.ticker.value" :currency="app.currency.value" :fresh-label="freshLabels.price" /></div>
-        </div>
+        <div class="glass-card p-4"><FinancialOverviewChart :fundamentals="app.data.fundamentals" :ticker="app.ticker.value" :currency="app.currency.value" :fresh-label="freshLabels.fundamentals" /></div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="glass-card p-4"><RevenueChart :fundamentals="app.data.fundamentals" :ticker="app.ticker.value" :currency="app.currency.value" :fresh-label="freshLabels.fundamentals" /></div>
           <div class="glass-card p-4"><MarginsChart :fundamentals="app.data.fundamentals" :fresh-label="freshLabels.fundamentals" /></div>
         </div>
+
+        <div class="glass-card p-4"><ValuationChart :fundamentals="app.data.fundamentals" :prices="app.data.priceBands" :ticker="app.ticker.value" :fresh-label="freshLabels.fundamentals" /></div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="glass-card p-4"><EvFcfChart :fundamentals="app.data.fundamentals" :ticker="app.ticker.value" :currency="app.currency.value" :fresh-label="freshLabels.fundamentals" /></div>
@@ -552,6 +552,8 @@ watch(() => app.ticker.value, (newTicker) => {
           <div class="glass-card p-4"><DebtChart :fundamentals="app.data.fundamentals" :ticker="app.ticker.value" :currency="app.currency.value" :fresh-label="freshLabels.fundamentals" /></div>
           <div class="glass-card p-4"><SharesChart :fundamentals="app.data.fundamentals" :fresh-label="freshLabels.fundamentals" /></div>
         </div>
+
+        <div class="glass-card p-4"><DrawdownChart :drawdown="app.data.drawdown" :ticker="app.ticker.value" :currency="app.currency.value" :fresh-label="freshLabels.price" /></div>
       </template>
     </template>
   </main>
