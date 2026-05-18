@@ -305,7 +305,7 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
           </Transition>
         </div>
 
-        <!-- Reload ranking (rápido, lee de Supabase) -->
+        <!-- Reload ranking (rápido, lee de Supabase) ..-->
         <!-- <button
           v-if="!loadingRanking"
           class="gw-btn-icon"
