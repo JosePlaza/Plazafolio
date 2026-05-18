@@ -230,6 +230,10 @@ export async function getCachedAnalysis(ticker) {
             fundamentals: data.fundamentals || null,
           },
           profile: data.profile,
+          score: data.score ?? null,
+          currentRank: data.current_rank ?? null,
+          previousRank: data.previous_rank ?? null,
+          rankUpdatedAt: data.rank_updated_at ?? null,
         }
         // Update local cache
         const local = readAnalysisLocal()
@@ -272,6 +276,10 @@ export async function getAllCachedAnalyses() {
               fundamentals: row.fundamentals || null,
             },
             profile: row.profile,
+            score: row.score ?? null,
+            currentRank: row.current_rank ?? null,
+            previousRank: row.previous_rank ?? null,
+            rankUpdatedAt: row.rank_updated_at ?? null,
           }
         })
         writeAnalysisLocal(result)
@@ -283,7 +291,7 @@ export async function getAllCachedAnalyses() {
   return local
 }
 
-export async function saveCachedAnalysis(ticker, years, analysisData, profile) {
+export async function saveCachedAnalysis(ticker, years, analysisData, profile, score = null) {
   const key = ticker.toUpperCase()
   const today = new Date().toISOString().split('T')[0]
 
@@ -295,6 +303,7 @@ export async function saveCachedAnalysis(ticker, years, analysisData, profile) {
     lastUpdated: today,
     data: analysisData,
     profile,
+    score,
   }
   writeAnalysisLocal(local)
 
@@ -302,7 +311,7 @@ export async function saveCachedAnalysis(ticker, years, analysisData, profile) {
   const userId = await getUserId()
   if (userId) {
     try {
-      const { error: upsertError } = await supabase.from('analyses').upsert({
+      const row = {
         user_id: userId,
         ticker: key,
         years,
@@ -313,7 +322,9 @@ export async function saveCachedAnalysis(ticker, years, analysisData, profile) {
         cash_flow: analysisData.cashFlow || null,
         fundamentals: analysisData.fundamentals || null,
         profile: profile || null,
-      }, { onConflict: 'user_id,ticker' })
+      }
+      if (score !== null) row.score = score
+      const { error: upsertError } = await supabase.from('analyses').upsert(row, { onConflict: 'user_id,ticker' })
       if (upsertError) {
         console.warn('Supabase saveCachedAnalysis upsert error:', upsertError.message)
       }
@@ -323,4 +334,25 @@ export async function saveCachedAnalysis(ticker, years, analysisData, profile) {
   }
 
   return { ok: true }
+}
+
+/**
+ * Dispara la RPC snapshot_user_ranking para el usuario actual: promueve
+ * current_rank -> previous_rank y recalcula current_rank desde score.
+ * Llamar al final de un bulk sync para que los deltas reflejen el cambio.
+ */
+export async function snapshotUserRanking() {
+  const userId = await getUserId()
+  if (!userId) return { ok: false, reason: 'no user' }
+  try {
+    const { error } = await supabase.rpc('snapshot_user_ranking', { uid: userId })
+    if (error) {
+      console.warn('snapshot_user_ranking failed:', error.message)
+      return { ok: false, reason: error.message }
+    }
+    return { ok: true }
+  } catch (err) {
+    console.warn('snapshot_user_ranking exception:', err.message)
+    return { ok: false, reason: err.message }
+  }
 }

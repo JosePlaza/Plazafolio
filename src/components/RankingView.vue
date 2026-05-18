@@ -3,6 +3,9 @@ import { ref, computed, onMounted, watch, onBeforeUnmount } from 'vue'
 import { getAllCachedAnalyses } from '@/services/assetsApi'
 import { computeBuyScore } from '@/lib/scoring'
 import { useCurrency } from '@/composables/useCurrency'
+import { useBulkSync } from '@/composables/useBulkSync'
+import BulkSyncDialog from '@/components/BulkSyncDialog.vue'
+import RankDelta from '@/components/RankDelta.vue'
 
 const props = defineProps({
   actives: { type: Array, default: () => [] },
@@ -16,6 +19,9 @@ const { symbolFor, convertByTicker } = useCurrency()
 const analyses = ref({})
 const loadingRanking = ref(false)
 const showScoringInfo = ref(false)
+
+const bulkSync = useBulkSync()
+const showBulkDialog = ref(false)
 
 const allAssets = computed(() => [...props.actives, ...props.watchlist])
 
@@ -31,6 +37,8 @@ const rankedAssets = computed(() => {
           scoring: null,
           indicators: null,
           projection: null,
+          previousRank: null,
+          currentRank: null,
           category: asset.category || (props.actives.find(a => a.id === asset.id) ? 'actives' : 'watchlist'),
         }
       }
@@ -46,6 +54,8 @@ const rankedAssets = computed(() => {
         scoring,
         indicators,
         projection,
+        previousRank: cached.previousRank ?? null,
+        currentRank: cached.currentRank ?? null,
         currency: symbolFor(asset.ticker),
         category: asset.category || (props.actives.find(a => a.id === asset.id) ? 'actives' : 'watchlist'),
       }
@@ -57,6 +67,39 @@ const rankedAssets = computed(() => {
       return b.score - a.score
     })
 })
+
+/**
+ * Delta de posición vs último snapshot.
+ * - null currentRank → ticker sin snapshot todavía → "NEW"
+ * - null previousRank (con currentRank) → primera aparición tras snapshot → "NEW"
+ * - delta > 0 → subió N posiciones (verde, ▲)
+ * - delta < 0 → bajó N posiciones (rojo, ▼)
+ * - delta = 0 → misma posición (gris, =)
+ */
+function rankDelta(item) {
+  if (item.currentRank == null) return { kind: 'new' }
+  if (item.previousRank == null) return { kind: 'new' }
+  const diff = item.previousRank - item.currentRank
+  if (diff > 0) return { kind: 'up', value: diff }
+  if (diff < 0) return { kind: 'down', value: -diff }
+  return { kind: 'same' }
+}
+
+async function startBulkSync() {
+  if (!allAssets.value.length) return
+  showBulkDialog.value = true
+  try {
+    await bulkSync.start(allAssets.value)
+  } finally {
+    // Tras el snapshot, recargar para refrescar previous/current rank
+    await loadAnalyses()
+  }
+}
+
+function closeBulkDialog() {
+  showBulkDialog.value = false
+  bulkSync.reset()
+}
 
 async function loadAnalyses() {
   loadingRanking.value = true
@@ -262,11 +305,11 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
           </Transition>
         </div>
 
-        <!-- Sync button -->
-        <button
+        <!-- Reload ranking (rápido, lee de Supabase) -->
+        <!-- <button
           v-if="!loadingRanking"
           class="gw-btn-icon"
-          title="Actualizar ranking"
+          title="Recargar ranking"
           @click="loadAnalyses"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -276,7 +319,23 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
             <path d="M22 12.5a10 10 0 0 1-18.8 4.3L2.5 16" />
           </svg>
         </button>
-        <div v-else class="spinner" style="width: 20px; height: 20px; border-width: 2px;"></div>
+        <div v-else class="spinner" style="width: 20px; height: 20px; border-width: 2px;"></div> -->
+
+        <!-- Sync All: recalcula TODOS los análisis y refresca snapshot -->
+        <button
+          class="gw-btn-icon"
+          :title="bulkSync.status.value === 'running' ? 'Sincronizando…' : 'Recalcular todos los análisis'"
+          :disabled="bulkSync.status.value === 'running' || !allAssets.length"
+          @click="startBulkSync"
+        >
+          <svg v-if="bulkSync.status.value !== 'running'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+            <path d="M3 3v5h5" />
+            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+            <path d="M16 16h5v5" />
+          </svg>
+          <div v-else class="spinner" style="width: 14px; height: 14px; border-width: 2px;"></div>
+        </button>
       </div>
     </div>
 
@@ -339,16 +398,19 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
       >
         <!-- Mobile layout: position left column, content right -->
         <div class="flex gap-3 sm:hidden">
-          <!-- Position badge pinned top-left -->
-          <div
-            class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
-            :style="{
-              background: item.scoring ? heatBg(item.scoring.heat) : 'rgba(255,255,255,0.04)',
-              color: item.scoring ? heatColor(item.scoring.heat) : '#71717a',
-              border: '1px solid ' + (item.scoring ? heatBorder(item.scoring.heat) : 'rgba(255,255,255,0.06)'),
-            }"
-          >
-            {{ idx + 1 }}
+          <!-- Position badge + delta pinned top-left -->
+          <div class="flex flex-col items-center gap-1 shrink-0">
+            <div
+              class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
+              :style="{
+                background: item.scoring ? heatBg(item.scoring.heat) : 'rgba(255,255,255,0.04)',
+                color: item.scoring ? heatColor(item.scoring.heat) : '#71717a',
+                border: '1px solid ' + (item.scoring ? heatBorder(item.scoring.heat) : 'rgba(255,255,255,0.06)'),
+              }"
+            >
+              {{ idx + 1 }}
+            </div>
+            <RankDelta :delta="rankDelta(item)" />
           </div>
 
           <!-- Right content column -->
@@ -434,16 +496,19 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
 
         <!-- Desktop layout: single row -->
         <div class="hidden sm:flex items-center gap-3 lg:gap-4">
-          <!-- Position -->
-          <div
-            class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
-            :style="{
-              background: item.scoring ? heatBg(item.scoring.heat) : 'rgba(255,255,255,0.04)',
-              color: item.scoring ? heatColor(item.scoring.heat) : '#71717a',
-              border: '1px solid ' + (item.scoring ? heatBorder(item.scoring.heat) : 'rgba(255,255,255,0.06)'),
-            }"
-          >
-            {{ idx + 1 }}
+          <!-- Position + delta stacked -->
+          <div class="flex flex-col items-center gap-1 shrink-0">
+            <div
+              class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
+              :style="{
+                background: item.scoring ? heatBg(item.scoring.heat) : 'rgba(255,255,255,0.04)',
+                color: item.scoring ? heatColor(item.scoring.heat) : '#71717a',
+                border: '1px solid ' + (item.scoring ? heatBorder(item.scoring.heat) : 'rgba(255,255,255,0.06)'),
+              }"
+            >
+              {{ idx + 1 }}
+            </div>
+            <RankDelta :delta="rankDelta(item)" />
           </div>
 
           <!-- Logo + Info -->
@@ -532,6 +597,20 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
         </div>
       </div>
     </div>
+
+    <!-- Bulk sync dialog -->
+    <BulkSyncDialog
+      :open="showBulkDialog"
+      :status="bulkSync.status.value"
+      :items="bulkSync.items"
+      :total="bulkSync.total.value"
+      :completed="bulkSync.completed.value"
+      :ok-count="bulkSync.okCount.value"
+      :error-count="bulkSync.errorCount.value"
+      :progress-pct="bulkSync.progressPct.value"
+      :elapsed-ms="bulkSync.elapsedMs.value"
+      @close="closeBulkDialog"
+    />
   </div>
 </template>
 

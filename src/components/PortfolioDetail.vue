@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import Highcharts from 'highcharts'
 import { useCurrency } from '@/composables/useCurrency'
 import { useTransactions } from '@/composables/useTransactions'
@@ -30,6 +30,7 @@ const assetTxs = transactionsForAsset(props.asset.id)
 const position = positionForAsset(props.asset.id, props.asset.ticker)
 
 // ── Add transaction form ──
+const addFormEl = ref(null)
 const showAddForm = ref(false)
 const newTxDate = ref(new Date().toISOString().split('T')[0])
 const newTxShares = ref('')
@@ -832,7 +833,7 @@ function fmtDate(dateStr) {
 
     <!-- ═══ Add Transaction Form ═══ -->
     <Transition name="slide-fade">
-      <div v-if="showAddForm" class="glass-card p-5 mb-4" style="border-color: rgba(65, 91, 255, 0.2);">
+      <div v-if="showAddForm" ref="addFormEl" class="glass-card p-5 mb-4" style="border-color: rgba(65, 91, 255, 0.2);">
         <div class="flex items-center gap-2 mb-4">
           <svg v-if="!editingTxId" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#415BFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="12" y1="5" x2="12" y2="19" />
@@ -993,7 +994,7 @@ function fmtDate(dateStr) {
         <p class="text-zinc-400 text-xs mb-2">Sin transacciones registradas</p>
         <button
           class="px-3 py-1 rounded-lg text-[10px] font-medium text-white bg-primary/80 hover:bg-primary transition-colors"
-          @click="showAddForm = true"
+          @click="showAddForm = true; nextTick(() => addFormEl?.scrollIntoView({ behavior: 'smooth', block: 'start' }))"
         >
           Registrar primera compra
         </button>

@@ -1,7 +1,6 @@
 import { ref, reactive, computed } from 'vue'
-import { getHistoricalPrices, getDividendHistory, getCompanyProfile, getCashFlowData, getFundamentalsData } from '@/services/fmpApi'
 import { getCachedAnalysis, saveCachedAnalysis } from '@/services/assetsApi'
-import { computeAll } from '@/lib/geraldine'
+import { runAnalysisForTicker } from '@/lib/analysisRunner'
 import { useCurrency } from '@/composables/useCurrency'
 
 /**
@@ -51,50 +50,17 @@ export function useGeraldine() {
   }
 
   /**
-   * Obtiene datos frescos de las APIs y calcula todo
+   * Obtiene datos frescos de las APIs y calcula todo (wrapper sobre el runner
+   * compartido para mantener la firma usada por este composable).
    */
   async function fetchAndCompute(tickerSymbol, periodYears, cachedProfile = null) {
-    const to = new Date()
-    const from = new Date()
-    from.setFullYear(from.getFullYear() - periodYears - 1)
-
-    const fromStr = from.toISOString().split('T')[0]
-    const toStr = to.toISOString().split('T')[0]
-
-    // Skip profile fetch if already cached (saves 1 FMP API call)
-    const fetches = [
-      getHistoricalPrices(tickerSymbol, fromStr, toStr),
-      getDividendHistory(tickerSymbol),
-      cachedProfile ? Promise.resolve(cachedProfile) : getCompanyProfile(tickerSymbol),
-      getCashFlowData(tickerSymbol).catch(() => []),
-      getFundamentalsData(tickerSymbol).catch(() => null),
-    ]
-    const [prices, dividends, profile, cashFlow, fundamentals] = await Promise.all(fetches)
-
-    if (!prices.length) {
-      throw new Error(`No se encontraron datos de precios para ${tickerSymbol}`)
-    }
-
-    if (!dividends.length) {
-      throw new Error(`No se encontraron datos de dividendos para ${tickerSymbol}. Esta empresa puede no pagar dividendos.`)
-    }
-
-    const filteredDividends = dividends.filter((d) => d.date >= fromStr)
-
-    const result = computeAll({
-      prices,
-      dividends: filteredDividends,
-      years: periodYears,
-      profile,
-    })
-
-    return { result, profile, cashFlow, fundamentals }
+    return runAnalysisForTicker(tickerSymbol, periodYears, cachedProfile)
   }
 
   /**
    * Guarda el resultado del análisis en el servidor
    */
-  async function saveToCache(tickerSymbol, periodYears, result, profile, cashFlow, fundamentals) {
+  async function saveToCache(tickerSymbol, periodYears, result, profile, cashFlow, fundamentals, score = null) {
     try {
       // Only save lightweight data needed for ranking + cache check.
       // Heavy chart data (priceBands, dailyYields, drawdown) is NOT cached
@@ -105,7 +71,7 @@ export function useGeraldine() {
         dividends: result.dividends,
         cashFlow: cashFlow || null,
         fundamentals: fundamentals || null,
-      }, profile)
+      }, profile, score)
     } catch (err) {
       console.warn('Error guardando análisis en cache:', err.message)
     }
@@ -151,9 +117,9 @@ export function useGeraldine() {
         // Cache is stale — full refresh, save new cache
         loading.value = true
         try {
-          const { result, profile, cashFlow, fundamentals } = await fetchAndCompute(ticker.value, periodYears)
+          const { result, profile, cashFlow, fundamentals, score } = await fetchAndCompute(ticker.value, periodYears)
           applyData(result, profile, cashFlow, fundamentals)
-          await saveToCache(ticker.value, periodYears, result, profile, cashFlow, fundamentals)
+          await saveToCache(ticker.value, periodYears, result, profile, cashFlow, fundamentals, score)
         } catch (err) {
           console.error('Error generando análisis:', err)
           error.value = err.message || 'Error al obtener datos'
@@ -171,9 +137,9 @@ export function useGeraldine() {
     loading.value = true
 
     try {
-      const { result, profile, cashFlow, fundamentals } = await fetchAndCompute(ticker.value, periodYears)
+      const { result, profile, cashFlow, fundamentals, score } = await fetchAndCompute(ticker.value, periodYears)
       applyData(result, profile, cashFlow, fundamentals)
-      await saveToCache(ticker.value, periodYears, result, profile, cashFlow, fundamentals)
+      await saveToCache(ticker.value, periodYears, result, profile, cashFlow, fundamentals, score)
     } catch (err) {
       console.error('Error generando análisis:', err)
       error.value = err.response?.data?.['Error Message'] || err.message || 'Error al obtener datos'

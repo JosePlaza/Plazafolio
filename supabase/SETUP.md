@@ -45,10 +45,15 @@ supabase functions deploy update-analyses --no-verify-jwt
 ### Set Edge Function Secrets
 
 ```bash
-supabase secrets set FMP_API_KEY=your-fmp-api-key
+supabase secrets set APP_BASE_URL=https://your-app.vercel.app
 ```
 
-(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are auto-injected)
+`APP_BASE_URL` debe apuntar al dominio público donde están desplegadas las
+funciones serverless (`/api/prices`, `/api/dividends`, `/api/profile`,
+`/api/cashflow`, `/api/fundamentals`). La Edge Function las llama para reusar
+la normalización FMP/Yahoo del backend en lugar de duplicar la lógica.
+
+(SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY son auto-inyectados)
 
 ## 6. Set Up Cron Schedule
 
@@ -57,7 +62,18 @@ In the Supabase dashboard, go to **SQL Editor** and run:
 The cron schedule is already included at the bottom of `schema.sql` (section 7).
 Before running it, replace `YOUR_PROJECT_REF` and `YOUR_SERVICE_ROLE_KEY` with your actual values.
 
-It runs every 8 hours (00:00, 08:00, 16:00 UTC).
+Se ejecuta **una vez al día a las 06:00 UTC** (~07-08h España según horario).
+La Edge Function:
+1. Lee todos los tickers únicos de la tabla `assets` (todos los usuarios).
+2. Para cada ticker, llama a tu backend Vercel para obtener prices, dividends,
+   profile, cashFlow y fundamentals.
+3. Recalcula el método Geraldine Weiss (`indicators` + `projection`) por
+   usuario respetando su ventana `years`.
+4. Hace upsert en `analyses` con todos los campos.
+5. Refresca también `assets.price` con el último precio del profile.
+
+Esto mantiene el ranking actualizado al día aunque ningún usuario abra los
+tickers manualmente.
 
 ### Verify Cron
 
