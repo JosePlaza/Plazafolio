@@ -7,7 +7,7 @@ export default async function handler(req, res) {
     const { q } = req.query
     if (!q || q.length < 1) return res.json([])
 
-    const results = await yf.search(q, { quotesCount: 8, newsCount: 0 })
+    const results = await yf.search(q, { quotesCount: 8, newsCount: 0 }, { validateResult: false })
     const quotes = (results.quotes || [])
       .filter((r) => r.isYahooFinance && (r.quoteType === 'EQUITY' || r.quoteType === 'ETF'))
       .map((r) => ({
