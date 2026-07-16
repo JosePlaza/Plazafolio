@@ -63,7 +63,9 @@ select cron.schedule(
   $$
 );
 
+
 -- Verificar que quedó programado:
 --   select jobname, schedule, active from cron.job where jobname = 'update-analyses-daily';
 -- Forzar una ejecución ahora mismo para poblar el primer snapshot (opcional):
---   supabase functions invoke update-analyses
+--   supabase functions invoke update-
+--
