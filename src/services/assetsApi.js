@@ -345,6 +345,28 @@ export async function snapshotUserRanking() {
   const userId = await getUserId()
   if (!userId) return { ok: false, reason: 'no user' }
   try {
+    // Snapshot at most once per calendar day (UTC). Running it again the same
+    // day (e.g. a second manual "Sync All", or a manual sync after the daily
+    // cron) would promote current_rank -> previous_rank with unchanged scores
+    // and collapse every delta to "=" (misma posición), erasing the real
+    // day-over-day movement. Skip if we already snapshotted today.
+    const { data: last } = await supabase
+      .from('analyses')
+      .select('rank_updated_at')
+      .eq('user_id', userId)
+      .not('rank_updated_at', 'is', null)
+      .order('rank_updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (last?.rank_updated_at) {
+      const lastDay = new Date(last.rank_updated_at).toISOString().slice(0, 10)
+      const today = new Date().toISOString().slice(0, 10)
+      if (lastDay === today) {
+        return { ok: true, skipped: 'already snapshotted today' }
+      }
+    }
+
     const { error } = await supabase.rpc('snapshot_user_ranking', { uid: userId })
     if (error) {
       console.warn('snapshot_user_ranking failed:', error.message)
