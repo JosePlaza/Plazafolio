@@ -5,7 +5,6 @@ import { useAuth } from '@/composables/useAuth'
 import { useAppState } from '@/composables/useAppState'
 import AuthView from '@/components/AuthView.vue'
 import AppHeader from '@/components/AppHeader.vue'
-import AppSidebar from '@/components/AppSidebar.vue'
 import BottomNavbar from '@/components/BottomNavbar.vue'
 import FloatingAudioPlayer from '@/components/FloatingAudioPlayer.vue'
 import AddAssetModal from '@/components/AddAssetModal.vue'
@@ -19,13 +18,11 @@ const router = useRouter()
 provide('appState', app)
 
 // Current tab derived from route
-const activeTab = computed(() => route.meta?.tab || 'analysis')
+const activeTab = computed(() => route.meta?.tab || 'home')
 
 // Navigation helpers
 function onTabChange(tab) {
   app.portfolioDetailAsset.value = null
-  // Close sidebar when navigating via bottom navbar
-  app.sidebarOpen.value = false
   router.push(`/${tab}`)
 }
 
@@ -71,10 +68,8 @@ onMounted(async () => {
     <!-- Header -->
     <AppHeader
       :active-tab="activeTab"
-      :sidebar-open="app.sidebarOpen.value"
       :actives="app.actives.value"
       @update:active-tab="onTabChange"
-      @toggle-sidebar="app.sidebarOpen.value = !app.sidebarOpen.value"
       @sign-out="signOut"
       @open-settings="openSettings"
     />
@@ -87,31 +82,15 @@ onMounted(async () => {
         style="padding-top: calc(3.5rem + env(safe-area-inset-top, 0px));"
       >
         <router-view />
-
-        <!-- Sidebar (only on analysis tab) -->
-        <AppSidebar
-          v-if="activeTab === 'analysis'"
-          :actives="app.actives.value"
-          :watchlist="app.watchlist.value"
-          :selected-id="app.selectedAssetId.value"
-          :open="app.sidebarOpen.value"
-          @select="onSelectAsset"
-          @add="app.showAddModal.value = true"
-          @move="app.onMoveAsset"
-          @reorder="app.onReorderAssets"
-          @remove="app.onRemoveAsset"
-          @close="app.sidebarOpen.value = false"
-        />
       </div>
     </Transition>
 
     <!-- Floating audio player (persists across views) -->
-    <FloatingAudioPlayer :sidebar-open="app.sidebarOpen.value" />
+    <FloatingAudioPlayer />
 
     <!-- Bottom navbar (mobile only) -->
     <BottomNavbar
       :active-tab="activeTab"
-      :sidebar-open="app.sidebarOpen.value"
       @update:active-tab="onTabChange"
     />
 

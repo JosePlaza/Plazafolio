@@ -14,6 +14,8 @@
     { "source": "/api/cashflow", "destination": "/api/cashflow" },
     { "source": "/api/fundamentals", "destination": "/api/fundamentals" },
     { "source": "/api/search", "destination": "/api/search" },
+    { "source": "/api/dividend-calendar", "destination": "/api/dividend-calendar" },
+    { "source": "/api/valuation-snapshot", "destination": "/api/valuation-snapshot" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "headers": [

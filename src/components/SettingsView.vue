@@ -1,9 +1,21 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, inject, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSettings } from '@/composables/useSettings'
+import { useCurrency } from '@/composables/useCurrency'
+import GordonSettingsCard from '@/components/valuation/GordonSettingsCard.vue'
 
 const router = useRouter()
+
+// §2.1 — el preview de Gordon usa el ticker activo si lo hay.
+const app = inject('appState', null)
+const { symbolFor } = useCurrency()
+const gordonTicker = computed(() => app?.ticker?.value || '')
+const gordonD0 = computed(() => {
+  const td = app?.data?.trailingDividends
+  return td?.length ? td[td.length - 1].annualDividend : null
+})
+const gordonCurrency = computed(() => symbolFor(gordonTicker.value))
 
 const { geminiApiKey, syncing, setGeminiApiKey } = useSettings()
 
@@ -248,6 +260,15 @@ function masked(key) {
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- ── Modelo de Gordon (SPEC §2.1) ── -->
+    <div class="mt-4">
+      <GordonSettingsCard
+        :ticker="gordonTicker"
+        :d0="gordonD0"
+        :currency="gordonCurrency"
+      />
     </div>
 
     <!-- Info note -->

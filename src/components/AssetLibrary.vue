@@ -8,10 +8,9 @@ const props = defineProps({
   actives: { type: Array, default: () => [] },
   watchlist: { type: Array, default: () => [] },
   selectedId: { type: String, default: null },
-  open: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['select', 'add', 'move', 'remove', 'reorder', 'close'])
+const emit = defineEmits(['select', 'add', 'move', 'remove', 'reorder'])
 
 // ── Collapse state ──
 function loadCollapseState() {
@@ -137,7 +136,6 @@ function selectAsset(asset) {
     return
   }
   emit('select', asset)
-  emit('close')
 }
 
 // ── Delete confirmation ──
@@ -199,30 +197,19 @@ function getIndicatorTop(list, idx) { return idx * 44 + 'px' }
 </script>
 
 <template>
-  <!-- Mobile backdrop -->
-  <Transition name="sidebar-backdrop">
-    <div
-      v-if="open"
-      class="fixed inset-0 z-[45] bg-black/50 backdrop-blur-sm lg:hidden"
-      @click="emit('close')"
-    />
-  </Transition>
-
-  <aside
-    class="glass-sidebar w-72 fixed right-0 bottom-0 z-[45] flex flex-col transition-transform duration-300 lg:translate-x-0"
-    style="top: calc(3.5rem + env(safe-area-inset-top, 0px));"
-    :class="open ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'"
-  >
-    <!-- Sidebar header -->
-    <div class="flex items-center justify-between px-4 py-3 border-b border-white/[0.04]">
-      <span class="text-[10px] font-bold text-muted-foreground tracking-[0.2em] uppercase">Portfolio</span>
-      <button class="gw-btn-icon w-7 h-7" @click="$emit('add')" title="Añadir activo">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
+  <div class="max-w-2xl mx-auto">
+    <!-- Cabecera -->
+    <div class="flex items-center justify-between mb-5">
+      <div>
+        <h2 class="text-xl font-bold text-foreground tracking-tight">Mis activos</h2>
+        <p class="text-muted-foreground text-xs mt-0.5">Pulsa un activo para analizarlo</p>
+      </div>
+      <button class="gw-btn-icon" @click="$emit('add')" title="Añadir activo">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg>
       </button>
     </div>
 
-    <!-- Scrollable list -->
-    <div class="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+    <div class="space-y-3">
 
       <!-- ── ACTIVES group ── -->
       <div>
@@ -405,7 +392,7 @@ function getIndicatorTop(list, idx) { return idx * 44 + 'px' }
       </div>
 
     </div>
-  </aside>
+  </div>
 
   <!-- Delete confirmation modal -->
   <Teleport to="body">

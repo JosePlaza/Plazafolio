@@ -1,14 +1,8 @@
 <script setup>
 import { inject } from 'vue'
-import { useRouter } from 'vue-router'
 import DividendsView from '@/components/DividendsView.vue'
 
 const app = inject('appState')
-const router = useRouter()
-
-function openSimulator() {
-  router.push('/simulator')
-}
 </script>
 
 <template>
@@ -16,7 +10,6 @@ function openSimulator() {
     <DividendsView
       :actives="app.actives.value"
       :visible="true"
-      @open-simulator="openSimulator"
     />
   </main>
 </template>

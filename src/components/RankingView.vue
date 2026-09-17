@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, watch, onBeforeUnmount } from 'vue'
-import { getAllCachedAnalyses } from '@/services/assetsApi'
+import { getAllCachedAnalyses, persistScores, snapshotUserRanking } from '@/services/assetsApi'
 import { computeBuyScore } from '@/lib/scoring'
 import { useCurrency } from '@/composables/useCurrency'
 import { useBulkSync } from '@/composables/useBulkSync'
@@ -69,17 +69,44 @@ const rankedAssets = computed(() => {
 })
 
 /**
+ * Posición anterior de cada item, expresada en el MISMO espacio de posiciones
+ * que el número que se pinta al lado (`idx + 1` sobre `rankedAssets`).
+ *
+ * El snapshot de Supabase (`previous_rank`) se calcula sobre otra población
+ * —solo filas de `analyses` que sigan en `assets`, con desempate por ticker y
+ * con el `score` persistido, no el recalculado en vivo—, así que restarlo tal
+ * cual contra la posición visible daba flechas que no cuadraban con el número.
+ *
+ * Solución: cogemos los items que SÍ tienen foto anterior, nos quedamos con los
+ * huecos que ocupan hoy en la lista visible, y repartimos esos mismos huecos
+ * según el orden del snapshot. Así ambas posiciones viven en la misma escala,
+ * los que no se movieron dan "=" exacto y las subidas compensan a las bajadas.
+ */
+const previousPositions = computed(() => {
+  const eligible = rankedAssets.value
+    .map((item, idx) => ({ item, pos: idx + 1 }))
+    .filter(({ item }) => item.previousRank != null && item.score != null)
+
+  const slots = eligible.map((e) => e.pos)
+  const previous = new Map()
+  eligible
+    .slice()
+    .sort((a, b) => a.item.previousRank - b.item.previousRank)
+    .forEach((e, i) => previous.set(e.item.id, slots[i]))
+  return previous
+})
+
+/**
  * Delta de posición vs último snapshot.
- * - null currentRank → ticker sin snapshot todavía → "NEW"
- * - null previousRank (con currentRank) → primera aparición tras snapshot → "NEW"
+ * - sin posición anterior → aún no ha entrado en ningún snapshot → "NEW"
  * - delta > 0 → subió N posiciones (verde, ▲)
  * - delta < 0 → bajó N posiciones (rojo, ▼)
  * - delta = 0 → misma posición (gris, =)
  */
-function rankDelta(item) {
-  if (item.currentRank == null) return { kind: 'new' }
-  if (item.previousRank == null) return { kind: 'new' }
-  const diff = item.previousRank - item.currentRank
+function rankDelta(item, idx) {
+  const prev = previousPositions.value.get(item.id)
+  if (prev == null) return { kind: 'new' }
+  const diff = prev - (idx + 1)
   if (diff > 0) return { kind: 'up', value: diff }
   if (diff < 0) return { kind: 'down', value: -diff }
   return { kind: 'same' }
@@ -106,10 +133,51 @@ async function loadAnalyses() {
   try {
     const data = await getAllCachedAnalyses()
     analyses.value = data || {}
+    await syncScoresAndRanks()
   } catch (err) {
     console.error('Error loading analyses for ranking:', err)
   } finally {
     loadingRanking.value = false
+  }
+}
+
+/**
+ * Mantiene la columna `score` de Supabase coherente con el score que se muestra
+ * (recalculado en vivo), porque `snapshot_user_ranking` ordena por esa columna:
+ * si está a null el snapshot sale alfabético por ticker y el ranking anterior
+ * contra el que comparamos es basura.
+ *
+ * Después llama a la RPC en cada carga. Es seguro: la función solo promueve
+ * `current_rank -> previous_rank` al cruzar día; el resto de llamadas solo
+ * refrescan la posición actual. Solo releemos cuando ha promovido de verdad,
+ * que es lo único que cambia el delta.
+ */
+async function syncScoresAndRanks() {
+  const entries = []
+  for (const [ticker, cached] of Object.entries(analyses.value)) {
+    if (!cached?.data?.indicators) continue
+    const s = computeBuyScore(
+      cached.data.indicators,
+      cached.data.projection,
+      cached.data.dividends,
+      cached.data.cashFlow || null,
+      cached.data.fundamentals || null,
+    )
+    const live = s.score
+    const stored = cached.score
+    // Persistir si falta o difiere de forma apreciable del recalculado en vivo.
+    if (live != null && (stored == null || Math.abs(stored - live) > 0.05)) {
+      entries.push({ ticker, score: live })
+    }
+  }
+
+  if (entries.length) await persistScores(entries)
+
+  const snap = await snapshotUserRanking()
+  if (snap?.promoted) {
+    // Releer para reflejar el nuevo previous_rank en el delta.
+    const fresh = await getAllCachedAnalyses()
+    if (fresh) analyses.value = fresh
   }
 }
 
@@ -410,7 +478,7 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
             >
               {{ idx + 1 }}
             </div>
-            <RankDelta :delta="rankDelta(item)" />
+            <RankDelta :delta="rankDelta(item, idx)" />
           </div>
 
           <!-- Right content column -->
@@ -508,7 +576,7 @@ function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return N
             >
               {{ idx + 1 }}
             </div>
-            <RankDelta :delta="rankDelta(item)" />
+            <RankDelta :delta="rankDelta(item, idx)" />
           </div>
 
           <!-- Logo + Info -->

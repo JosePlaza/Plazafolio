@@ -533,6 +533,112 @@ app.get('/api/dividends', async (req, res) => {
   }
 })
 
+// ─── Yahoo Finance: Fecha de PAGO del próximo dividendo ──────────────────────
+// Espejo de api/dividend-calendar.js (Vercel). server.js registra las rutas a
+// mano, así que toda ruta nueva hay que añadirla aquí también o en local da 404.
+app.get('/api/dividend-calendar', async (req, res) => {
+  try {
+    const { symbols } = req.query
+    if (!symbols) return res.status(400).json({ error: 'Falta el parámetro symbols' })
+
+    const list = [...new Set(
+      String(symbols).split(',').map((s) => s.trim().toUpperCase()).filter(Boolean),
+    )].slice(0, 100)
+    if (!list.length) return res.json([])
+
+    const todayISO = new Date().toISOString().split('T')[0]
+    const toISODate = (value) => {
+      if (!value) return null
+      const d = value instanceof Date ? value : new Date(value)
+      return Number.isNaN(d.getTime()) ? null : d.toISOString().split('T')[0]
+    }
+
+    const results = []
+    const CONCURRENCY = 6
+    let cursor = 0
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, list.length) }, async () => {
+        while (cursor < list.length) {
+          const i = cursor++
+          const symbol = list[i]
+          try {
+            const r = await yf.quoteSummary(symbol, {
+              modules: ['calendarEvents', 'summaryDetail'],
+            })
+            const paymentDate = toISODate(r?.calendarEvents?.dividendDate)
+            results[i] = {
+              symbol,
+              paymentDate,
+              isUpcoming: paymentDate ? paymentDate >= todayISO : false,
+              exDividendDate: toISODate(
+                r?.calendarEvents?.exDividendDate ?? r?.summaryDetail?.exDividendDate,
+              ),
+              annualRate: r?.summaryDetail?.dividendRate ?? null,
+            }
+          } catch (err) {
+            console.warn(`/api/dividend-calendar [${symbol}]: ${err.message}`)
+            results[i] = {
+              symbol,
+              paymentDate: null,
+              isUpcoming: false,
+              exDividendDate: null,
+              annualRate: null,
+              error: err.message,
+            }
+          }
+        }
+      }),
+    )
+
+    res.json(results)
+  } catch (err) {
+    console.error('Error /api/dividend-calendar:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── Yahoo Finance: Snapshot de valoración (SPEC_01 §1.1) ────────────────────
+// Espejo de api/valuation-snapshot.js. Campos ausentes viajan como null: la
+// spec prohíbe imputar valores (§7.4).
+app.get('/api/valuation-snapshot', async (req, res) => {
+  try {
+    const { symbol } = req.query
+    if (!symbol) return res.status(400).json({ error: 'Falta el parámetro symbol' })
+
+    const qs = await yf.quoteSummary(symbol, {
+      modules: ['price', 'summaryDetail', 'defaultKeyStatistics', 'financialData'],
+    })
+    const price = qs?.price || {}
+    const sd = qs?.summaryDetail || {}
+    const ks = qs?.defaultKeyStatistics || {}
+    const fd = qs?.financialData || {}
+    const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+    res.json({
+      precioActual: n(price.regularMarketPrice),
+      currency: price.currency ?? null,
+      marketCap: n(price.marketCap),
+      dividendRate: n(sd.dividendRate),
+      trailingAnnualDividendRate: n(sd.trailingAnnualDividendRate),
+      dividendYield: n(sd.dividendYield),
+      fiveYearAvgDividendYield: n(sd.fiveYearAvgDividendYield),
+      payoutRatio: n(sd.payoutRatio),
+      trailingPE: n(sd.trailingPE),
+      trailingEps: n(ks.trailingEps),
+      sharesOutstanding: n(ks.sharesOutstanding),
+      enterpriseValue: n(ks.enterpriseValue),
+      enterpriseToEbitda: n(ks.enterpriseToEbitda),
+      ebitda: n(fd.ebitda),
+      totalDebt: n(fd.totalDebt),
+      totalCash: n(fd.totalCash),
+      freeCashflow: n(fd.freeCashflow),
+    })
+  } catch (err) {
+    console.warn(`/api/valuation-snapshot [${req.query?.symbol}]: ${err.message}`)
+    res.json({ error: err.message })
+  }
+})
+
 // ─── FMP: Perfil de empresa ──────────────────────────────────────────────────
 app.get('/api/profile', async (req, res) => {
   try {

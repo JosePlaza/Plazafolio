@@ -6,9 +6,8 @@ import { useTransactions } from '@/composables/useTransactions'
 import AnimatedNumber from '@/components/AnimatedNumber.vue'
 import ToastNotification from '@/components/ToastNotification.vue'
 import DatePicker from '@/components/DatePicker.vue'
-import ChartInfoOverlay from '@/components/ChartInfoOverlay.vue'
-import DividendSafetyCard from '@/components/DividendSafetyCard.vue'
-import EarningsCallBrief from '@/components/EarningsCallBrief.vue'
+import DividendMonthsCard from '@/components/DividendMonthsCard.vue'
+import FinancialReportsSection from '@/components/FinancialReportsSection.vue'
 const props = defineProps({
   asset: { type: Object, required: true },
   indicators: { type: Object, default: null },
@@ -566,219 +565,13 @@ function renderPriceChart() {
 watch(priceChartOptions, renderPriceChart, { deep: true })
 watch(selectedTimeframe, fetchPriceData)
 
-// ── DCA Projection ──
-const dcaChartContainer = ref(null)
-let dcaChartInstance = null
-const dcaMonthlyAmount = ref(50) // user-controlled monthly investment (slider)
-
-const dcaProjection = computed(() => {
-  const txs = assetTxs.value || []
-  // Only consider buys for DCA pattern
-  const buys = txs.filter(tx => tx.shares > 0).sort((a, b) => a.date.localeCompare(b.date))
-  if (buys.length < 2) return null
-
-  const nativeCur = nativeCurrencyOf(props.asset.ticker)
-  const rate = eurUsdRate.value || 1.14
-
-  // Analyze DCA pattern from buy history
-  const buyDates = buys.map(b => new Date(b.date + 'T00:00:00'))
-  const firstBuy = buyDates[0]
-  const lastBuy = buyDates[buyDates.length - 1]
-  const spanMonths = Math.max(1, (lastBuy - firstBuy) / (1000 * 60 * 60 * 24 * 30.44))
-
-  // Calculate totals in display currency
-  let totalInvested = 0
-  let totalSharesBought = 0
-  buys.forEach(b => {
-    let priceDisplay = b.pricePerShare
-    if (b.currency === 'EUR' && nativeCur === 'USD') priceDisplay = priceDisplay * rate
-    else if (b.currency === 'USD' && nativeCur === 'EUR') priceDisplay = priceDisplay / rate
-    priceDisplay = cv(priceDisplay)
-    totalInvested += b.shares * priceDisplay
-    totalSharesBought += b.shares
-  })
-
-  const detectedMonthlyInvestment = totalInvested / spanMonths
-  const avgSharesPerBuy = totalSharesBought / buys.length
-  const buyFrequencyMonths = spanMonths / buys.length
-
-  // Use slider value for projection
-  const monthlyInvestment = dcaMonthlyAmount.value
-
-  // Current position
-  const currentShares = shares.value
-  const currentDivPerShare = convertedAnnualDivPerShare.value
-  const currentPrice = convertedCurrentPrice.value
-  const divGrowth = cagr.value / 100 // annual div growth rate
-
-  // Shares bought per month based on slider investment and current price
-  const sharesPerMonth = currentPrice > 0 ? monthlyInvestment / currentPrice : 0
-
-  // Project forward 15 years
-  const projectedYears = []
-  let projShares = currentShares
-  let projDivPerShare = currentDivPerShare
-
-  for (let y = 0; y <= 15; y++) {
-    const yearIncome = projShares * projDivPerShare
-    const totalInv = totalInvested + (monthlyInvestment * 12 * y)
-    projectedYears.push({
-      year: new Date().getFullYear() + y,
-      shares: projShares,
-      divPerShare: projDivPerShare,
-      annualIncome: yearIncome,
-      invested: totalInv,
-      yoc: totalInv > 0 ? (yearIncome / totalInv) * 100 : 0,
-    })
-    // Next year: add shares from DCA + grow dividend
-    projShares += sharesPerMonth * 12
-    projDivPerShare *= (1 + divGrowth)
-  }
-
-  return {
-    detectedMonthlyInvestment,
-    monthlyInvestment,
-    avgSharesPerBuy,
-    buyFrequencyMonths,
-    projectedYears,
-    shares5y: projectedYears[5]?.shares || 0,
-    shares10y: projectedYears[10]?.shares || 0,
-    shares15y: projectedYears[15]?.shares || 0,
-    income5y: projectedYears[5]?.annualIncome || 0,
-    income10y: projectedYears[10]?.annualIncome || 0,
-    income15y: projectedYears[15]?.annualIncome || 0,
-  }
-})
-
-const dcaChartOptions = computed(() => {
-  if (!dcaProjection.value?.projectedYears?.length) return null
-  const c = sym.value
-  const data = dcaProjection.value.projectedYears
-
-  const categories = data.map(d => String(d.year))
-  const incomeData = data.map(d => d.annualIncome)
-  const yocData = data.map(d => d.yoc)
-
-  // Split historical (year 0) vs projected
-  const histIncome = [incomeData[0], ...new Array(incomeData.length - 1).fill(null)]
-  const projIncome = [incomeData[0], ...incomeData.slice(1)]
-
-  return {
-    chart: {
-      type: 'column',
-      backgroundColor: 'transparent',
-      style: { fontFamily: 'Inter, system-ui, sans-serif' },
-      spacing: [8, 8, 8, 8],
-      height: 260,
-    },
-    title: { text: null },
-    xAxis: {
-      categories,
-      labels: { style: { color: '#71717a', fontSize: '9px' } },
-      lineColor: 'rgba(255,255,255,0.06)',
-      tickLength: 0,
-    },
-    yAxis: [
-      {
-        title: { text: null },
-        labels: {
-          style: { color: '#71717a', fontSize: '9px' },
-          formatter() { return c + this.value.toFixed(0) },
-        },
-        gridLineColor: 'rgba(255,255,255,0.04)',
-        gridLineDashStyle: 'Dot',
-      },
-      {
-        title: { text: null },
-        labels: {
-          style: { color: '#71717a', fontSize: '9px' },
-          formatter() { return this.value.toFixed(1) + '%' },
-        },
-        opposite: true,
-        gridLineWidth: 0,
-      },
-    ],
-    legend: { enabled: false },
-    tooltip: {
-      useHTML: true,
-      shared: true,
-      backgroundColor: 'transparent',
-      borderWidth: 0,
-      shadow: false,
-      padding: 0,
-      formatter() {
-        const yr = this.x
-        const pts = this.points || []
-        let html = `<div style="background:rgba(14,14,22,0.92);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:8px 12px;box-shadow:0 8px 32px rgba(0,0,0,0.4);">`
-        html += `<div style="color:#a1a1aa;font-size:10px;margin-bottom:4px;">${yr}</div>`
-        pts.forEach(p => {
-          if (p.series.name === 'YoC') {
-            html += `<div style="color:#fbbf24;font-size:11px;">YoC: ${p.y.toFixed(2)}%</div>`
-          } else {
-            html += `<div style="color:#34d399;font-size:11px;font-weight:600;">Ingreso: ${c}${p.y.toFixed(2)}</div>`
-          }
-        })
-        html += `</div>`
-        return html
-      },
-    },
-    plotOptions: {
-      column: { borderRadius: 3, borderWidth: 0 },
-    },
-    series: [
-      {
-        name: 'Actual',
-        data: histIncome,
-        color: '#34d399',
-        zIndex: 1,
-      },
-      {
-        name: 'Proyectado',
-        data: projIncome,
-        color: 'rgba(52,211,153,0.3)',
-        zIndex: 0,
-      },
-      {
-        name: 'YoC',
-        type: 'spline',
-        data: yocData,
-        color: '#fbbf24',
-        lineWidth: 1.5,
-        dashStyle: 'ShortDash',
-        yAxis: 1,
-        marker: { enabled: false },
-        zIndex: 2,
-      },
-    ],
-    credits: { enabled: false },
-  }
-})
-
-function renderDcaChart() {
-  if (dcaChartOptions.value && dcaChartContainer.value) {
-    if (dcaChartInstance) dcaChartInstance.destroy()
-    dcaChartInstance = Highcharts.chart(dcaChartContainer.value, dcaChartOptions.value)
-  }
-}
-
-watch(dcaChartOptions, renderDcaChart, { deep: true })
-
-// Initialize slider from detected investment amount (clamped to slider range)
-watch(() => dcaProjection.value?.detectedMonthlyInvestment, (detected) => {
-  if (detected && dcaMonthlyAmount.value === 50) {
-    const clamped = Math.round(Math.min(100, Math.max(10, detected)) / 5) * 5
-    dcaMonthlyAmount.value = clamped
-  }
-}, { immediate: true })
 
 onMounted(() => {
   loadTx()
   fetchPriceData()
-  setTimeout(renderDcaChart, 200)
 })
 onBeforeUnmount(() => {
   if (priceChartInstance) { priceChartInstance.destroy(); priceChartInstance = null }
-  if (dcaChartInstance) { dcaChartInstance.destroy(); dcaChartInstance = null }
 })
 
 function fmt(val, dec = 2) { if (val == null || isNaN(val)) return '-'; return Number(val).toFixed(dec) }
@@ -1001,12 +794,6 @@ function fmtDate(dateStr) {
       </div>
     </div>
 
-    <!-- ═══ Dividend Safety Radar ═══ -->
-    <DividendSafetyCard :ticker="asset.ticker" class="mb-4" />
-
-    <!-- ═══ Earnings Call Dividend Decoder ═══ -->
-    <EarningsCallBrief :ticker="asset.ticker" class="mb-4" />
-
     <!-- ═══ Price Chart Card ═══ -->
     <div class="glass-card p-4 mb-4">
       <div class="flex items-center justify-between mb-2">
@@ -1154,47 +941,15 @@ function fmtDate(dateStr) {
       </div>
     </div>
 
-    <!-- ═══ DCA Projection Card ═══ -->
-    <div v-if="dcaProjection && dcaProjection.projectedYears.length" class="glass-card p-4 mb-4">
-      <ChartInfoOverlay description="Proyecta tus ingresos por dividendos a 15 años si mantienes un plan de compra mensual (DCA). Las barras verdes son datos reales y las translúcidas son la proyección. La línea amarilla muestra tu Yield on Cost (rentabilidad sobre tu inversión total). Ajusta el importe mensual con el slider para ver cómo cambia tu futuro ingreso pasivo.">
-        <h3 class="text-xs font-semibold text-foreground uppercase tracking-wider mb-0.5">Proyección DCA</h3>
-        <div class="text-[10px] text-zinc-500 mb-2">CAGR dividendo {{ fmt(cagr) }}%</div>
-        <!-- Monthly investment slider -->
-        <div class="flex items-center gap-3 mb-3">
-          <span class="text-[10px] text-zinc-400 whitespace-nowrap">Inversión mensual</span>
-          <input
-            type="range"
-            v-model.number="dcaMonthlyAmount"
-            min="10"
-            max="100"
-            step="5"
-            class="dca-slider flex-1"
-          />
-          <span class="text-xs font-bold text-emerald-400 tabular-nums whitespace-nowrap" style="min-width: 52px; text-align: right;">
-            {{ sym }}{{ dcaMonthlyAmount }}
-          </span>
-        </div>
-        <div ref="dcaChartContainer" class="w-full" style="height: 260px;"></div>
-        <!-- Summary KPIs -->
-        <div class="grid grid-cols-3 gap-2 sm:gap-4 mt-3 pt-3 border-t border-white/5">
-          <div>
-            <div class="text-[10px] text-zinc-400 uppercase tracking-wider mb-0.5">5 años</div>
-            <div class="text-sm font-bold text-emerald-400 tabular-nums">{{ sym }}{{ fmtK(dcaProjection.income5y) }}/año</div>
-            <div class="text-[9px] text-zinc-500 tabular-nums">{{ fmt(dcaProjection.shares5y, 0) }} acc</div>
-          </div>
-          <div>
-            <div class="text-[10px] text-zinc-400 uppercase tracking-wider mb-0.5">10 años</div>
-            <div class="text-sm font-bold text-emerald-400 tabular-nums">{{ sym }}{{ fmtK(dcaProjection.income10y) }}/año</div>
-            <div class="text-[9px] text-zinc-500 tabular-nums">{{ fmt(dcaProjection.shares10y, 0) }} acc</div>
-          </div>
-          <div>
-            <div class="text-[10px] text-zinc-400 uppercase tracking-wider mb-0.5">15 años</div>
-            <div class="text-sm font-bold text-emerald-400 tabular-nums">{{ sym }}{{ fmtK(dcaProjection.income15y) }}/año</div>
-            <div class="text-[9px] text-zinc-500 tabular-nums">{{ fmt(dcaProjection.shares15y, 0) }} acc</div>
-          </div>
-        </div>
-      </ChartInfoOverlay>
-    </div>
+    <!-- ═══ Meses de pago del dividendo ═══ -->
+    <DividendMonthsCard
+      :ticker="asset.ticker"
+      :dividends="dividends"
+      :shares="shares"
+    />
+
+    <!-- ═══ Informes de resultados + seguridad del dividendo + earnings call ═══ -->
+    <FinancialReportsSection :ticker="asset.ticker" class="mb-4" />
 
     <!-- Toast notification -->
     <ToastNotification
@@ -1416,42 +1171,4 @@ function fmtDate(dateStr) {
   opacity: 0;
 }
 
-/* ── DCA Slider ── */
-.dca-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.1);
-  outline: none;
-  cursor: pointer;
-}
-.dca-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #34d399;
-  border: 2px solid rgba(14, 14, 22, 0.8);
-  cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-.dca-slider::-webkit-slider-thumb:hover {
-  transform: scale(1.2);
-  box-shadow: 0 0 8px rgba(52, 211, 153, 0.4);
-}
-.dca-slider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #34d399;
-  border: 2px solid rgba(14, 14, 22, 0.8);
-  cursor: pointer;
-}
-.dca-slider::-moz-range-track {
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.1);
-}
 </style>

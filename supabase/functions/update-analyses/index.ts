@@ -389,8 +389,20 @@ Deno.serve(async (req) => {
   const appBaseUrl = (Deno.env.get("APP_BASE_URL") || "").replace(/\/$/, "");
 
   if (!appBaseUrl) {
+    // Diagnóstico: devolvemos los NOMBRES (nunca los valores) de las variables
+    // visibles para el isolate. Sin esto, un secret que no llega es
+    // indistinguible de un secret mal escrito o guardado en otro proyecto, y
+    // el único síntoma es este mismo 500 genérico.
+    let envKeys: string[] = [];
+    try {
+      envKeys = Object.keys(Deno.env.toObject()).sort();
+    } catch { /* --allow-env restringido */ }
     return new Response(
-      JSON.stringify({ error: "APP_BASE_URL secret no configurado" }),
+      JSON.stringify({
+        error: "APP_BASE_URL secret no configurado",
+        hint: "Settings > Edge Functions > Secrets, o `supabase secrets set APP_BASE_URL=...`",
+        envKeys,
+      }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
@@ -461,7 +473,12 @@ Deno.serve(async (req) => {
         const yrs = yearsMap.get(`${userId}|${ticker}`) || DEFAULT_YEARS;
         const { indicators, projection } = computeIndicators(prices, dividends, yrs, profile);
         const score = computeBuyScore(indicators, projection, dividends, cashFlow, fundamentals);
-        await supabase.from("analyses").upsert(
+        // supabase-js NO lanza en error de escritura: devuelve { error }. Sin
+        // mirarlo, un upsert rechazado (p. ej. una columna que no existe en el
+        // esquema) se reportaba como "ok" y la respuesta decía 42/42 mientras
+        // no se escribía ni una fila. Propagar el error deja el ticker marcado
+        // en `results` y cuadra el contador `failed`.
+        const { error: upsertError } = await supabase.from("analyses").upsert(
           {
             user_id: userId,
             ticker,
@@ -477,14 +494,20 @@ Deno.serve(async (req) => {
           },
           { onConflict: "user_id,ticker" },
         );
+        if (upsertError) {
+          throw new Error(`upsert analyses: ${upsertError.message}`);
+        }
       }
 
       // Refrescamos también el price del asset (para vistas que no usan analyses)
       if (compactProfile?.price) {
-        await supabase
+        const { error: priceError } = await supabase
           .from("assets")
           .update({ price: compactProfile.price })
           .eq("ticker", ticker);
+        if (priceError) {
+          console.warn(`update assets.price(${ticker}) failed:`, priceError.message);
+        }
       }
 
       results[ticker] = "ok";
@@ -497,11 +520,23 @@ Deno.serve(async (req) => {
   // current_rank desde el score persistido.
   const allUserIds = new Set<string>();
   for (const set of tickerUsers.values()) for (const uid of set) allUserIds.add(uid);
+  // supabase-js devuelve { error } en vez de lanzar, así que hay que mirarlo
+  // explícitamente: sin esto un snapshot fallido se reportaba como éxito y el
+  // delta de RankingView se quedaba congelado sin ninguna señal.
+  let snapshotsOk = 0;
+  const snapshotErrors: string[] = [];
   for (const uid of allUserIds) {
     try {
-      await supabase.rpc("snapshot_user_ranking", { uid });
+      const { error } = await supabase.rpc("snapshot_user_ranking", { uid });
+      if (error) {
+        console.warn(`snapshot_user_ranking(${uid}) failed:`, error.message);
+        snapshotErrors.push(`${uid}: ${error.message}`);
+      } else {
+        snapshotsOk++;
+      }
     } catch (err) {
-      console.warn(`snapshot_user_ranking(${uid}) failed:`, (err as Error).message);
+      console.warn(`snapshot_user_ranking(${uid}) threw:`, (err as Error).message);
+      snapshotErrors.push(`${uid}: ${(err as Error).message}`);
     }
   }
 
@@ -512,7 +547,9 @@ Deno.serve(async (req) => {
       tickers: tickers.length,
       ok: okCount,
       failed: tickers.length - okCount,
-      snapshots: allUserIds.size,
+      snapshots: snapshotsOk,
+      snapshotsExpected: allUserIds.size,
+      ...(snapshotErrors.length ? { snapshotErrors } : {}),
       results,
     }),
     {

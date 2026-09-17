@@ -297,6 +297,7 @@ export async function saveCachedAnalysis(ticker, years, analysisData, profile, s
 
   // Save to localStorage
   const local = readAnalysisLocal()
+  const prev = local[key]
   local[key] = {
     ticker: key,
     years,
@@ -304,6 +305,11 @@ export async function saveCachedAnalysis(ticker, years, analysisData, profile, s
     data: analysisData,
     profile,
     score,
+    // Conservar la foto del ranking: vive en Supabase, pero si la borramos del
+    // cache local un arranque sin red (o el primer paint) pinta todo como "NEW".
+    currentRank: prev?.currentRank ?? null,
+    previousRank: prev?.previousRank ?? null,
+    rankUpdatedAt: prev?.rankUpdatedAt ?? null,
   }
   writeAnalysisLocal(local)
 
@@ -337,42 +343,58 @@ export async function saveCachedAnalysis(ticker, years, analysisData, profile, s
 }
 
 /**
- * Dispara la RPC snapshot_user_ranking para el usuario actual: promueve
- * current_rank -> previous_rank y recalcula current_rank desde score.
- * Llamar al final de un bulk sync para que los deltas reflejen el cambio.
+ * Persiste el `score` calculado en vivo para un conjunto de tickers.
+ * El ranking (RPC `snapshot_user_ranking`) ordena por la columna `score`; si
+ * está a null el ranking sale alfabético por ticker y el delta nunca varía.
+ * El frontend recalcula el score en cada carga, así que lo usamos como fuente
+ * de verdad para mantener la columna poblada y coherente con lo que se muestra.
+ *
+ * @param {Array<{ticker: string, score: number}>} entries
+ * @returns {Promise<{ ok: boolean, updated: number }>}
+ */
+export async function persistScores(entries) {
+  if (!entries?.length) return { ok: false, updated: 0 }
+  const userId = await getUserId()
+  if (!userId) return { ok: false, updated: 0 }
+
+  let updated = 0
+  await Promise.all(entries.map(async ({ ticker, score }) => {
+    if (score == null || Number.isNaN(score)) return
+    const { error } = await supabase
+      .from('analyses')
+      .update({ score })
+      .eq('user_id', userId)
+      .eq('ticker', ticker)
+    if (error) console.warn(`persistScores(${ticker}) failed:`, error.message)
+    else updated++
+  }))
+
+  return { ok: true, updated }
+}
+
+/**
+ * Recalcula el ranking del usuario en Supabase.
+ *
+ * La RPC es idempotente dentro del mismo día: refresca `current_rank` en cada
+ * llamada, pero solo promueve `current_rank -> previous_rank` al cruzar día.
+ * Por eso aquí ya NO hay guard en JS: el de antes era un read-then-write con
+ * carrera (dos pestañas, bulk sync + recarga) y encima no cubría al cron de la
+ * Edge Function, así que la foto del día anterior acababa machacada con la de
+ * hoy y todos los deltas se quedaban en "=".
+ *
+ * @returns {Promise<{ ok: boolean, promoted?: boolean, ranked?: number, reason?: string }>}
+ *   `promoted` indica si `previous_rank` ha cambiado (hay que releer analyses).
  */
 export async function snapshotUserRanking() {
   const userId = await getUserId()
   if (!userId) return { ok: false, reason: 'no user' }
   try {
-    // Snapshot at most once per calendar day (UTC). Running it again the same
-    // day (e.g. a second manual "Sync All", or a manual sync after the daily
-    // cron) would promote current_rank -> previous_rank with unchanged scores
-    // and collapse every delta to "=" (misma posición), erasing the real
-    // day-over-day movement. Skip if we already snapshotted today.
-    const { data: last } = await supabase
-      .from('analyses')
-      .select('rank_updated_at')
-      .eq('user_id', userId)
-      .not('rank_updated_at', 'is', null)
-      .order('rank_updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (last?.rank_updated_at) {
-      const lastDay = new Date(last.rank_updated_at).toISOString().slice(0, 10)
-      const today = new Date().toISOString().slice(0, 10)
-      if (lastDay === today) {
-        return { ok: true, skipped: 'already snapshotted today' }
-      }
-    }
-
-    const { error } = await supabase.rpc('snapshot_user_ranking', { uid: userId })
+    const { data, error } = await supabase.rpc('snapshot_user_ranking', { uid: userId })
     if (error) {
       console.warn('snapshot_user_ranking failed:', error.message)
       return { ok: false, reason: error.message }
     }
-    return { ok: true }
+    return { ok: true, promoted: !!data?.promoted, ranked: data?.ranked ?? 0 }
   } catch (err) {
     console.warn('snapshot_user_ranking exception:', err.message)
     return { ok: false, reason: err.message }

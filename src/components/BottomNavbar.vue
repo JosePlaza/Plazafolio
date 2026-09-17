@@ -8,6 +8,12 @@ const emit = defineEmits(['update:activeTab'])
 
 const tabs = [
   {
+    id: 'home',
+    label: 'Inicio',
+    // Lucide: layout-list
+    icon: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><path d="M14 4h7"/><path d="M14 9h7"/><path d="M14 15h7"/><path d="M14 20h7"/></svg>`,
+  },
+  {
     id: 'analysis',
     label: 'Análisis',
     // Lucide: chart-no-axes-column
@@ -145,6 +151,9 @@ const tabs = [
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1;
+  /* Con 5 pestañas cada una baja a ~65px en pantallas de 360px: sin esto
+     "Dividendos" parte en dos líneas y descuadra la altura de la barra. */
+  white-space: nowrap;
 }
 
 /* ── Label transition ── */
